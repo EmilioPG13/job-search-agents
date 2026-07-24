@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy this to profile.json and fill in your real data. profile.json is gitignored — never commit it, it contains PII.",
+  "_comment": "Copy this to profile.json and fill it in. profile.json is gitignored — never commit it, it contains personal data.",
 
   "contact": {
     "name": "Your Name",
@@ -14,21 +14,23 @@
   },
 
   "targeting": {
-    "target_roles": ["Software Engineer", "Backend Developer"],
-    "seniority": "mid",
-    "must_have": {
-      "min_salary": 70000,
-      "salary_currency": "USD",
-      "work_mode": ["remote", "hybrid"],
-      "employment_type": ["full_time"],
-      "visa_sponsorship_required": false
-    },
-    "nice_to_have": ["Node.js", "TypeScript", "small team"],
-    "dealbreakers": ["no on-call required by role", "no unpaid overtime culture"]
+    "_comment": "Read by the Prefilter (cheap rules) and the Filter agent (scoring).",
+
+    "target_roles": ["frontend", "backend", "fullstack", "data_ml"],
+    "seniority": "junior",
+
+    "filter_by_region": false,
+    "regions_eligible": ["US", "EU", "LATAM"],
+
+    "min_salary": null,
+    "salary_currency": "USD",
+
+    "work_mode": ["remote", "hybrid"],
+    "dealbreakers": ["no unpaid positions"]
   },
 
   "ground_truth": {
-    "_comment": "This is what the Verify agent checks tailored resumes against. Only put things that are true — this is your anti-hallucination reference, not aspirational content.",
+    "_comment": "What the Verify agent checks tailored resumes against. Only put things that are true — this is your anti-hallucination reference, not aspirational content. Anything missing here will be treated as invented.",
     "skills": ["JavaScript", "Node.js", "Express", "SQL", "React"],
     "experience": [
       {

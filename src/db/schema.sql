@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   salary_max             INTEGER,
   salary_currency        TEXT,
   posted_at              TEXT,                     -- ISO date from the source
+  tags                   TEXT,                      -- JSON array from the source
   raw_description        TEXT NOT NULL,
 
   -- Set by the Discovery agent's heuristic scan (src/lib/promptSafety.js) at

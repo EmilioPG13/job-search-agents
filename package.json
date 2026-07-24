@@ -7,6 +7,7 @@
   "scripts": {
     "db:init": "node src/db/init.js",
     "discover": "node src/agents/discovery.js",
+    "prefilter": "node src/agents/prefilter.js",
     "analyze": "node src/agents/analysis.js"
   },
   "engines": {
