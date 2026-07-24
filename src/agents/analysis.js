@@ -140,14 +140,16 @@ async function run({ limit = 5 } = {}) {
 
 if (require.main === module) {
   const limit = Number(process.argv[2]) || 5;
+  // Set exitCode rather than calling process.exit(): a hard exit while the
+  // SQLite handle is still open crashes libuv on Windows.
   run({ limit })
     .then(({ analyzed, failed }) => {
       console.log(`\nAnalyzed ${analyzed}, failed ${failed}.`);
-      if (failed > 0) process.exit(1);
+      if (failed > 0) process.exitCode = 1;
     })
     .catch((err) => {
       console.error('Analysis run failed:', err.message);
-      process.exit(1);
+      process.exitCode = 1;
     });
 }
 

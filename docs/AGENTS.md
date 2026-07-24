@@ -70,16 +70,24 @@ below salary floor) never cost anything.
 
 ### Getting reliable JSON out of NIM
 
-NIM offers two ways to constrain output, and they are not equivalent:
+Measured against `integrate.api.nvidia.com` on 2026-07-24, same prompt each time:
 
-- `nvext.guided_json` — constrains generation to an actual JSON schema.
-- `response_format: {type: "json_object"}` — only guarantees *some* valid
-  JSON. An empty `{}` satisfies it.
+| Mechanism | Result |
+|---|---|
+| `response_format: {type: "json_schema", ...}` | ✅ output matched the schema exactly |
+| `response_format: {type: "json_object"}` | ⚠️ valid JSON, but the model invented its own field names |
+| strict "JSON only" prompt, no parameter | ⚠️ valid JSON, arbitrary field names |
+| `nvext: {guided_json: ...}` | ❌ **silently ignored** — model replied in prose |
 
-We send `guided_json`, and fall back to `json_object` plus an in-prompt schema
-only if an endpoint rejects the `nvext` extension. Because that fallback has no
-real guarantee, `askForJson()` validates the required fields itself before
-returning — so a malformed reply fails loudly on the row instead of silently
+NVIDIA's docs recommend `nvext.guided_json`, and that guidance is for
+**self-hosted** NIM. On the hosted endpoint it is accepted and then ignored —
+the worst possible failure mode, because nothing errors. The first version of
+this code trusted the docs and every row failed with prose where JSON was
+expected. **Test the endpoint you're actually calling.**
+
+So `askForJson()` sends `json_schema`, falls back to `json_object` plus an
+explicit instruction if a model rejects it, and validates the required fields
+itself either way — a malformed reply fails loudly on that row instead of
 writing junk into the database.
 
 ## The status ladder
