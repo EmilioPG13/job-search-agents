@@ -51,7 +51,9 @@ some other embedded instruction. Every agent in this pipeline that reads
 ## Stack
 
 - Node.js / Express
-- OpenAI SDK
+- Anthropic SDK — Claude Opus 5 orchestrates, Claude Sonnet 5 runs the
+  specialist agents. See [docs/AGENTS.md](docs/AGENTS.md) for why the work is
+  split that way.
 - SQLite for job state, via Node's built-in `node:sqlite` module (no native
   build toolchain required — `better-sqlite3` was tried first but needs
   Visual Studio Build Tools on Windows, so we use the runtime's own SQLite
@@ -61,9 +63,16 @@ some other embedded instruction. Every agent in this pipeline that reads
 
 ```bash
 npm install
-cp .env.example .env   # then fill in OPENAI_API_KEY
+cp .env.example .env   # then fill in ANTHROPIC_API_KEY
 npm run db:init         # creates data/jobs.sqlite and applies the schema
 cp src/profile/profile.example.json src/profile/profile.json  # then fill in your real data
+```
+
+Then run the pipeline steps that exist so far:
+
+```bash
+npm run discover        # pull postings from RemoteOK into the database
+npm run analyze 5       # extract structured requirements from 5 postings
 ```
 
 `src/profile/profile.json` and the SQLite database are gitignored — they

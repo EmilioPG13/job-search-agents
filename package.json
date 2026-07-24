@@ -5,14 +5,16 @@
   "description": "Multi-agent pipeline that discovers, filters, tailors, and verifies job applications with a human approval step.",
   "main": "src/index.js",
   "scripts": {
-    "db:init": "node src/db/init.js"
+    "db:init": "node src/db/init.js",
+    "discover": "node src/agents/discovery.js",
+    "analyze": "node src/agents/analysis.js"
   },
   "engines": {
     "node": ">=22.5.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "dotenv": "^16.4.5",
-    "express": "^5.0.1",
-    "openai": "^4.68.0"
+    "express": "^5.0.1"
   }
 }

@@ -31,8 +31,10 @@ CREATE TABLE IF NOT EXISTS jobs (
 
   -- Pipeline state
   status                 TEXT NOT NULL DEFAULT 'discovered',
-  -- discovered -> filtered_in | filtered_out
-  -- filtered_in -> analyzed -> tailored -> verified
+  -- See docs/AGENTS.md for the full ladder and which agent owns each step.
+  -- discovered -> rules_rejected | analyzed
+  -- analyzed -> scored_out | scored_in
+  -- scored_in -> tailored -> verified
   -- verified -> pending_approval -> approved | rejected_by_user
   -- approved -> applied -> tracking | closed
 
