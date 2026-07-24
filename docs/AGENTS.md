@@ -6,14 +6,14 @@ specialist agents, one shared database, one human approval gate.
 ## The shape of the system
 
 ```
-                      ORCHESTRATOR  (Claude Opus 5)
+                      ORCHESTRATOR
                       picks up rows, decides what runs next,
                       handles retries and errors
                                  │
     ┌──────────┬──────────┬──────┴─────┬──────────┬──────────────┐
     ▼          ▼          ▼            ▼          ▼              ▼
  Discovery  Prefilter  Analysis     Filter     Tailor        Verify
- (no LLM)   (no LLM)   (Sonnet 5)  (Sonnet 5) (Sonnet 5)   (Sonnet 5)
+ (no LLM)   (no LLM)   (NIM fast)  (NIM fast) (NIM strong) (NIM strong)
     │          │          │            │          │              │
     └──────────┴──────────┴────────────┴──────────┴──────────────┘
                                  │
@@ -26,6 +26,25 @@ specialist agents, one shared database, one human approval gate.
                           Application agent
 ```
 
+## Two different sets of models
+
+These are easy to confuse, and confusing them costs real money.
+
+| | Build time | Run time |
+|---|---|---|
+| What it is | Writing this codebase | The app analyzing job postings |
+| Models | Claude (Opus orchestrating, Sonnet subagents) | **NVIDIA NIM** |
+| Runs | While developing, in Claude Code | Every time the pipeline processes a job |
+| Who pays | Part of the dev session | Your NVIDIA account |
+
+**Nothing in `src/` may call a paid frontier API.** The app's models are
+reached only through [`src/lib/llm.js`](../src/lib/llm.js), which points at
+NIM. Claude's involvement ends when the code is written.
+
+NIM speaks the OpenAI wire format, so the app uses the `openai` package with a
+different `baseURL` — not an NVIDIA-specific client. Changing providers later
+is a base URL and two model names.
+
 Agents never call each other. Every agent reads a job row, does one job,
 writes its result back, and moves the row's `status` forward. That is the
 whole coordination mechanism — no message queue, no agent-to-agent chat.
@@ -34,17 +53,34 @@ whole coordination mechanism — no message queue, no agent-to-agent chat.
 most one row's work, and "why did this job get rejected?" is answerable by
 reading one row plus its history.
 
-## Model tiering
+## Runtime model tiering (all on NIM)
 
-| Role | Model | Why |
-|---|---|---|
-| Orchestrator | `claude-opus-5` | Decides what runs, interprets failures, handles the odd cases. Judgment work, low volume. |
-| Specialist agents | `claude-sonnet-5` | Narrow tasks with a fixed output shape, run over many rows. Fast and cheaper per row. |
-| Discovery, Prefilter, Approval, Application | no model | Deterministic code. Never spend a model call on something a rule can decide. |
+| Tier | Default model | Used by | Why |
+|---|---|---|---|
+| `FAST` | `meta/llama-3.1-8b-instruct` | Analysis, Filter | High volume, mechanical extraction and scoring against a fixed schema. |
+| `STRONG` | `meta/llama-3.3-70b-instruct` | Tailor, Verify | Writing and fact-checking. Lower volume, higher stakes — a hallucinated resume line is the worst failure this system can produce. |
+| none | — | Discovery, Prefilter, Approval, Application, Tracker | Deterministic code. Never spend a model call on something a rule can decide. |
+
+Both are overridable via `NIM_MODEL_FAST` / `NIM_MODEL_STRONG` in `.env`, so
+swapping models is config, not a code change.
 
 The cheapest optimization in the whole system is *ordering*: the deterministic
 prefilter runs before any model call, so obviously-wrong jobs (wrong country,
 below salary floor) never cost anything.
+
+### Getting reliable JSON out of NIM
+
+NIM offers two ways to constrain output, and they are not equivalent:
+
+- `nvext.guided_json` — constrains generation to an actual JSON schema.
+- `response_format: {type: "json_object"}` — only guarantees *some* valid
+  JSON. An empty `{}` satisfies it.
+
+We send `guided_json`, and fall back to `json_object` plus an in-prompt schema
+only if an endpoint rejects the `nvext` extension. Because that fallback has no
+real guarantee, `askForJson()` validates the required fields itself before
+returning — so a malformed reply fails loudly on the row instead of silently
+writing junk into the database.
 
 ## The status ladder
 
@@ -81,7 +117,7 @@ scraper can't take down the rest of the pipeline.
 Rule checks against `profile.json`: salary floor, work mode, location,
 dealbreaker keywords. Rejects cheaply so the model never sees hopeless rows.
 
-### Analysis — Sonnet 5
+### Analysis — NIM, fast tier
 Reads `raw_description`, returns structured requirements: required and
 preferred skills, years of experience, seniority, keywords, red flags, and
 whether the posting contains instructions aimed at an AI reader.
@@ -94,15 +130,15 @@ whether the posting contains instructions aimed at an AI reader.
 **Why it's separate from Filter:** the same extracted requirements feed both
 the fit score and the resume tailoring. Extract once, reuse twice.
 
-### Filter — Sonnet 5
+### Filter — NIM, fast tier
 Scores the job against your profile using the *extracted requirements*, not
 the raw text. Returns `fit_score` (0–1) and `fit_reasoning`.
 
-### Tailor — Sonnet 5
+### Tailor — NIM, strong tier
 Calls the existing CV Tailor tool with your base CV plus the extracted
 requirements, producing a tailored resume.
 
-### Verify — Sonnet 5, fresh context
+### Verify — NIM, strong tier, fresh context
 Checks the tailored resume against two things:
 1. **Ground truth** — every claim traces to `profile.json.ground_truth`. No
    invented titles, dates, employers, or metrics.
@@ -139,10 +175,13 @@ Every specialist agent call follows the same shape:
    data to read, never instructions to follow. Non-negotiable: job
    descriptions are scraped third-party text, and real postings do contain
    text aimed at AI readers.
-3. **Structured output** — a JSON schema is attached to the request, so the
-   model's reply is guaranteed to parse. No regex, no "please respond in JSON".
-4. **Adaptive thinking**, with an `effort` level chosen per agent — low for
-   extraction, higher for verification.
+3. **Schema-constrained output** — see "Getting reliable JSON out of NIM"
+   above. No regex, no "please respond in JSON" as the primary mechanism.
+4. **Low temperature** — this is extraction and checking, not creative work.
+
+All of it goes through the single `askForJson()` in `src/lib/llm.js`, so an
+agent can't accidentally skip the untrusted-content boundary or the schema
+check by writing its own call.
 
 ## Failure handling
 

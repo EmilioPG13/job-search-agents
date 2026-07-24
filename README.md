@@ -51,9 +51,10 @@ some other embedded instruction. Every agent in this pipeline that reads
 ## Stack
 
 - Node.js / Express
-- Anthropic SDK — Claude Opus 5 orchestrates, Claude Sonnet 5 runs the
-  specialist agents. See [docs/AGENTS.md](docs/AGENTS.md) for why the work is
-  split that way.
+- **NVIDIA NIM** for all runtime model calls, via the `openai` package pointed
+  at NIM's OpenAI-compatible endpoint. Two tiers: a small model for extraction
+  and scoring, a larger one for writing and fact-checking. See
+  [docs/AGENTS.md](docs/AGENTS.md).
 - SQLite for job state, via Node's built-in `node:sqlite` module (no native
   build toolchain required — `better-sqlite3` was tried first but needs
   Visual Studio Build Tools on Windows, so we use the runtime's own SQLite
@@ -63,7 +64,7 @@ some other embedded instruction. Every agent in this pipeline that reads
 
 ```bash
 npm install
-cp .env.example .env   # then fill in ANTHROPIC_API_KEY
+cp .env.example .env   # then fill in NVIDIA_API_KEY (https://build.nvidia.com)
 npm run db:init         # creates data/jobs.sqlite and applies the schema
 cp src/profile/profile.example.json src/profile/profile.json  # then fill in your real data
 ```

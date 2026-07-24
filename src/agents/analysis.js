@@ -5,7 +5,7 @@
 // profile) and the Tailor (writes the resume). Extract once, reuse twice.
 
 const db = require('../db');
-const { askForJson } = require('../lib/claude');
+const { askForJson, MODELS } = require('../lib/llm');
 
 const SYSTEM = `You extract structured requirements from job postings.
 
@@ -109,7 +109,7 @@ async function analyzeOne(job) {
     task: `${TASK}\n\nRole title: ${job.title}\nCompany: ${job.company}`,
     untrusted: job.raw_description,
     schema: SCHEMA,
-    effort: 'low', // extraction, not judgment
+    model: MODELS.FAST, // extraction, not judgment
   });
 
   saveAnalysis.run(JSON.stringify(data), job.id);
