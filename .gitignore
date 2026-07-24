@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.local
+*.log
+dist/
+build/
+.DS_Store
+data/*.sqlite
+data/*.db
+src/profile/profile.json
+data/base_resume.pdf

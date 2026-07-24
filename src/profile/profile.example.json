@@ -1,0 +1,55 @@
+{
+  "_comment": "Copy this to profile.json and fill in your real data. profile.json is gitignored — never commit it, it contains PII.",
+
+  "contact": {
+    "name": "Your Name",
+    "email": "you@example.com",
+    "phone": "+1-555-555-5555",
+    "location": "City, Country",
+    "links": {
+      "linkedin": "",
+      "github": "",
+      "portfolio": ""
+    }
+  },
+
+  "targeting": {
+    "target_roles": ["Software Engineer", "Backend Developer"],
+    "seniority": "mid",
+    "must_have": {
+      "min_salary": 70000,
+      "salary_currency": "USD",
+      "work_mode": ["remote", "hybrid"],
+      "employment_type": ["full_time"],
+      "visa_sponsorship_required": false
+    },
+    "nice_to_have": ["Node.js", "TypeScript", "small team"],
+    "dealbreakers": ["no on-call required by role", "no unpaid overtime culture"]
+  },
+
+  "ground_truth": {
+    "_comment": "This is what the Verify agent checks tailored resumes against. Only put things that are true — this is your anti-hallucination reference, not aspirational content.",
+    "skills": ["JavaScript", "Node.js", "Express", "SQL", "React"],
+    "experience": [
+      {
+        "title": "Job Title",
+        "company": "Company Name",
+        "start_date": "2023-01",
+        "end_date": "present",
+        "bullets": [
+          "Factual accomplishment with real, verifiable numbers if any."
+        ]
+      }
+    ],
+    "education": [
+      {
+        "degree": "Degree Name",
+        "institution": "School Name",
+        "graduation_date": "2022-05"
+      }
+    ],
+    "certifications": []
+  },
+
+  "base_resume_path": "./data/base_resume.pdf"
+}
