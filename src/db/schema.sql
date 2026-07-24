@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS jobs (
   posted_at              TEXT,                     -- ISO date from the source
   raw_description        TEXT NOT NULL,
 
+  -- Set by the Discovery agent's heuristic scan (src/lib/promptSafety.js) at
+  -- ingestion time. A flag here does NOT block the job from the pipeline —
+  -- it's a visibility signal for you and for downstream agents, which must
+  -- independently treat raw_description as untrusted data regardless of
+  -- this flag (the flag can miss novel phrasings).
+  flagged_injection       INTEGER NOT NULL DEFAULT 0,  -- 0/1 boolean
+  flagged_injection_notes TEXT,                        -- JSON array of matched patterns
+
   -- Pipeline state
   status                 TEXT NOT NULL DEFAULT 'discovered',
   -- discovered -> filtered_in | filtered_out
