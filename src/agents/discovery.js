@@ -1,46 +1,26 @@
+// Discovery agent — pulls postings from every registered source into the jobs
+// table. Deliberately dumb: no judgment, no filtering, no model calls. Job
+// boards break constantly, so keeping this isolated means a broken source
+// can't take down the rest of the pipeline.
+//
+// Sources live in src/sources/ and each returns rows in one shared shape.
+// Adding a board is a new file plus a line in src/sources/index.js.
+
 const db = require('../db');
+const sources = require('../sources');
 const { detectSuspiciousInstructions } = require('../lib/promptSafety');
+const { repairEncoding } = require('../lib/text');
 
-const REMOTEOK_URL = 'https://remoteok.com/api';
-const USER_AGENT = 'Mozilla/5.0 (compatible; job-search-agents/0.1)';
-
-// RemoteOK serves double-encoded text: UTF-8 bytes re-encoded as if they were
-// Latin-1, so "Coordenação" arrives as "CoordenaÃ§Ã£o". Re-decoding recovers
-// the original. Only applied when the tell-tale byte pattern is present, and
-// only kept if the result is valid UTF-8 — so correctly-encoded text is never
-// touched.
-// Written with explicit escapes, not literal characters: the pattern is a
-// UTF-8 lead byte (U+00C2–U+00C3) followed by a continuation byte
-// (U+0080–U+00BF). As literals those bytes are invisible or ambiguous in an
-// editor, and an earlier version of this regex silently missed the
-// non-breaking-space case ("Appel Ã  candidature").
-const MOJIBAKE = /[Â-Ã][-¿]/;
-
-function repairEncoding(text) {
-  if (typeof text !== 'string' || !MOJIBAKE.test(text)) {
-    return text;
-  }
-  const repaired = Buffer.from(text, 'latin1').toString('utf8');
-  return repaired.includes('�') ? text : repaired;
-}
-
-async function fetchListings() {
-  const res = await fetch(REMOTEOK_URL, { headers: { 'User-Agent': USER_AGENT } });
-  if (!res.ok) throw new Error(`RemoteOK request failed: ${res.status}`);
-  const data = await res.json();
-  return data.slice(1); // index 0 is a legal notice, not a job
-}
-
-// On conflict we refresh `tags` rather than doing nothing: tags were added to
-// the schema after the first rows were already stored, so re-running discovery
-// backfills them without disturbing a job's pipeline state.
+// On conflict we refresh the source-derived fields but never touch pipeline
+// state (status, scores, tailored output). That makes re-running Discovery a
+// safe "refresh from source", which is also how parser fixes get backfilled.
 const upsert = db.prepare(`
   INSERT INTO jobs (
     source, source_id, url, title, company, location, remote,
     salary_min, salary_max, posted_at, tags, raw_description,
     flagged_injection, flagged_injection_notes
   ) VALUES (
-    'remoteok', @source_id, @url, @title, @company, @location, 1,
+    @source, @source_id, @url, @title, @company, @location, @remote,
     @salary_min, @salary_max, @posted_at, @tags, @raw_description,
     @flagged_injection, @flagged_injection_notes
   )
@@ -54,37 +34,58 @@ const upsert = db.prepare(`
     flagged_injection_notes = excluded.flagged_injection_notes
 `);
 
-function run() {
-  return fetchListings().then((listings) => {
-    // `result.changes` counts updated rows too, so it can't distinguish a new
-    // posting from a tag backfill. Compare row counts instead.
-    const before = db.prepare('SELECT COUNT(*) AS c FROM jobs').get().c;
-    for (const job of listings) {
-      const description = repairEncoding(job.description);
-      const check = detectSuspiciousInstructions(description);
-      upsert.run({
-        source_id: job.slug,
-        url: job.url,
-        title: repairEncoding(job.position),
-        company: repairEncoding(job.company),
-        location: repairEncoding(job.location) || null,
-        salary_min: job.salary_min || null,
-        salary_max: job.salary_max || null,
-        posted_at: job.date || null,
-        tags: JSON.stringify(job.tags || []),
-        raw_description: description,
-        flagged_injection: check.flagged ? 1 : 0,
-        flagged_injection_notes: check.flagged ? JSON.stringify(check.matches) : null,
-      });
-    }
-    const after = db.prepare('SELECT COUNT(*) AS c FROM jobs').get().c;
-    return { fetched: listings.length, inserted: after - before };
+function store(job) {
+  const check = detectSuspiciousInstructions(job.raw_description);
+  upsert.run({
+    source: job.source,
+    source_id: job.source_id,
+    url: job.url,
+    title: job.title,
+    company: job.company,
+    location: job.location ?? null,
+    remote: job.remote ?? 1,
+    salary_min: job.salary_min ?? null,
+    salary_max: job.salary_max ?? null,
+    posted_at: job.posted_at ?? null,
+    tags: JSON.stringify(job.tags || []),
+    raw_description: job.raw_description,
+    flagged_injection: check.flagged ? 1 : 0,
+    flagged_injection_notes: check.flagged ? JSON.stringify(check.matches) : null,
   });
 }
 
-// RemoteOK's feed is a rolling window of ~100 postings, so a row that has aged
-// out can never be refreshed by re-fetching. This repairs stored rows in place
-// instead — needed whenever a parsing fix lands after data was already saved.
+const countRows = db.prepare('SELECT COUNT(*) AS c FROM jobs');
+
+async function run({ only } = {}) {
+  const selected = only ? sources.filter((s) => s.name === only) : sources;
+  if (selected.length === 0) throw new Error(`No such source: ${only}`);
+
+  const results = [];
+
+  for (const source of selected) {
+    // `changes` counts updated rows too, so it can't tell a new posting from a
+    // refresh. Compare row counts instead.
+    const before = countRows.get().c;
+    try {
+      const jobs = await source.fetchJobs();
+      for (const job of jobs) store(job);
+      results.push({
+        source: source.name,
+        fetched: jobs.length,
+        inserted: countRows.get().c - before,
+      });
+    } catch (err) {
+      // One dead board must not stop the others.
+      results.push({ source: source.name, error: err.message });
+    }
+  }
+
+  return results;
+}
+
+// A source's feed is a rolling window, so a posting that has aged out can never
+// be refreshed by re-fetching. This repairs stored rows in place instead —
+// needed whenever a parsing fix lands after data was already saved.
 const repairStmt = db.prepare(`
   UPDATE jobs SET title = ?, company = ?, location = ?, raw_description = ?
   WHERE id = ?
@@ -101,8 +102,7 @@ function repairStoredRows() {
       location: repairEncoding(row.location),
       raw_description: repairEncoding(row.raw_description),
     };
-    const changed = Object.keys(fixed).some((k) => fixed[k] !== row[k]);
-    if (!changed) continue;
+    if (!Object.keys(fixed).some((k) => fixed[k] !== row[k])) continue;
     repairStmt.run(fixed.title, fixed.company, fixed.location, fixed.raw_description, row.id);
     repaired++;
   }
@@ -110,18 +110,31 @@ function repairStoredRows() {
   return { examined: rows.length, repaired };
 }
 
-if (require.main === module && process.argv.includes('--repair-encoding')) {
-  const { examined, repaired } = repairStoredRows();
-  console.log(`Checked ${examined} stored rows, repaired ${repaired}.`);
-} else if (require.main === module) {
-  run()
-    .then(({ fetched, inserted }) => {
-      console.log(`Fetched ${fetched} listings, inserted ${inserted} new.`);
-    })
-    .catch((err) => {
-      console.error('Discovery run failed:', err.message);
-      process.exit(1);
-    });
+if (require.main === module) {
+  const args = process.argv.slice(2);
+
+  if (args.includes('--repair-encoding')) {
+    const { examined, repaired } = repairStoredRows();
+    console.log(`Checked ${examined} stored rows, repaired ${repaired}.`);
+  } else {
+    const onlyFlag = args.indexOf('--source');
+    const only = onlyFlag !== -1 ? args[onlyFlag + 1] : undefined;
+
+    run({ only })
+      .then((results) => {
+        for (const r of results) {
+          if (r.error) console.error(`  ${r.source}: FAILED — ${r.error}`);
+          else console.log(`  ${r.source}: fetched ${r.fetched}, ${r.inserted} new`);
+        }
+        const total = results.reduce((n, r) => n + (r.inserted || 0), 0);
+        console.log(`\n${total} new postings.`);
+        if (results.every((r) => r.error)) process.exitCode = 1;
+      })
+      .catch((err) => {
+        console.error('Discovery run failed:', err.message);
+        process.exitCode = 1;
+      });
+  }
 }
 
-module.exports = { run, repairStoredRows, repairEncoding };
+module.exports = { run, repairStoredRows };

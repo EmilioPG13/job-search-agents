@@ -92,6 +92,14 @@ const selectPending = db.prepare(`
   LIMIT ?
 `);
 
+const selectPendingBySource = db.prepare(`
+  SELECT id, title, company, raw_description
+  FROM jobs
+  WHERE status = 'discovered' AND source = ?
+  ORDER BY id
+  LIMIT ?
+`);
+
 const saveAnalysis = db.prepare(`
   UPDATE jobs
   SET extracted_requirements = ?, status = 'analyzed', updated_at = datetime('now')
@@ -117,8 +125,10 @@ async function analyzeOne(job) {
   return { data, usage };
 }
 
-async function run({ limit = 5 } = {}) {
-  const pending = selectPending.all(limit);
+async function run({ limit = 5, source } = {}) {
+  const pending = source
+    ? selectPendingBySource.all(source, limit)
+    : selectPending.all(limit);
   const results = { analyzed: 0, failed: 0, errors: [] };
 
   for (const job of pending) {
@@ -139,10 +149,13 @@ async function run({ limit = 5 } = {}) {
 }
 
 if (require.main === module) {
-  const limit = Number(process.argv[2]) || 5;
+  const args = process.argv.slice(2);
+  const limit = Number(args.find((a) => /^\d+$/.test(a))) || 5;
+  const sourceFlag = args.indexOf('--source');
+  const source = sourceFlag !== -1 ? args[sourceFlag + 1] : undefined;
   // Set exitCode rather than calling process.exit(): a hard exit while the
   // SQLite handle is still open crashes libuv on Windows.
-  run({ limit })
+  run({ limit, source })
     .then(({ analyzed, failed }) => {
       console.log(`\nAnalyzed ${analyzed}, failed ${failed}.`);
       if (failed > 0) process.exitCode = 1;

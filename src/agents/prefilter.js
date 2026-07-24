@@ -44,6 +44,13 @@ const TECH_TERMS =
 const SENIOR_TITLE =
   /\b(senior|sr\.?|staff|principal|lead|head of|director|vp|vice president|chief|c[toei]o|executive|architect|manager)\b/i;
 
+// A posting can advertise several levels at once — "Senior & Junior Software
+// Engineers", "Junior to Senior Fullstack Engineer". Rejecting those on the
+// senior keyword alone threw away exactly the openings a junior wants, so a
+// junior signal anywhere in the posting overrides the seniority reject.
+const JUNIOR_SIGNAL =
+  /\b(junior|jr\.?|entry[- ]level|new grad(uate)?|intern(ship)?|apprentice(ship)?|trainee|early career|all levels|graduate program|0[-–]2 years|1[-–]3 years)\b/i;
+
 function classify(job, profile) {
   const title = (job.title || '').trim();
   const description = job.raw_description || '';
@@ -67,7 +74,12 @@ function classify(job, profile) {
     return { keep: false, reason: 'not a software role' };
   }
 
-  if (wantsJunior && SENIOR_TITLE.test(title)) {
+  if (
+    wantsJunior &&
+    SENIOR_TITLE.test(title) &&
+    !JUNIOR_SIGNAL.test(title) &&
+    !JUNIOR_SIGNAL.test(description)
+  ) {
     return { keep: false, reason: 'seniority above target level' };
   }
 
