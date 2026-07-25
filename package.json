@@ -8,7 +8,9 @@
     "db:init": "node src/db/init.js",
     "discover": "node src/agents/discovery.js",
     "prefilter": "node src/agents/prefilter.js",
-    "analyze": "node src/agents/analysis.js"
+    "analyze": "node src/agents/analysis.js",
+    "score": "node src/agents/filter.js",
+    "shortlist": "node src/tools/shortlist.js"
   },
   "engines": {
     "node": ">=22.5.0"
