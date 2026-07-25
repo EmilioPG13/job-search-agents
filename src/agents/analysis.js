@@ -7,6 +7,7 @@
 const db = require('../db');
 const { askForJson, MODELS } = require('../lib/llm');
 const { detectSuspiciousInstructions } = require('../lib/promptSafety');
+const { mapPool } = require('../lib/pool');
 
 const SYSTEM = `You extract structured requirements from job postings.
 
@@ -177,31 +178,40 @@ async function analyzeOne(job) {
   return { data, usage, claim };
 }
 
-async function run({ limit = 5, source } = {}) {
+async function run({ limit = 5, source, concurrency = 6 } = {}) {
   const pending = source
     ? selectPendingBySource.all(source, limit)
     : selectPending.all(limit);
   const results = { analyzed: 0, failed: 0, confirmed: 0, possible: 0, discarded: 0, errors: [] };
 
-  for (const job of pending) {
-    try {
-      const { data, claim } = await analyzeOne(job);
-      results.analyzed++;
-      if (claim.discarded) results.discarded++;
-      if (claim.confidence === 'confirmed') results.confirmed++;
-      if (claim.confidence === 'possible') results.possible++;
+  const outcomes = await mapPool(
+    pending,
+    concurrency,
+    (job) => analyzeOne(job),
+    (done, total) => {
+      if (done % 25 === 0 || done === total) console.log(`    ...${done}/${total}`);
+    },
+  );
 
-      const flag = {
-        confirmed: ' [injection attempt CONFIRMED]',
-        possible: ' [possible AI-directed text — advisory]',
-        none: claim.discarded ? ' [claim discarded: not in posting]' : '',
-      }[claim.confidence];
-      console.log(`  #${job.id} ${job.title.slice(0, 60)} @ ${job.company}${flag}`);
-    } catch (err) {
-      // Leave the row in 'discovered' so the next run retries it.
+  for (let i = 0; i < outcomes.length; i++) {
+    const job = pending[i];
+    const o = outcomes[i];
+
+    if (o.status === 'error') {
+      // Row stays 'discovered' so the next run retries it.
       results.failed++;
-      results.errors.push({ id: job.id, code: err.code, message: err.message });
-      console.error(`  #${job.id} failed: ${err.message}`);
+      results.errors.push({ id: job.id, code: o.error.code, message: o.error.message });
+      continue;
+    }
+
+    const { claim } = o.value;
+    results.analyzed++;
+    if (claim.discarded) results.discarded++;
+    if (claim.confidence === 'confirmed') results.confirmed++;
+    if (claim.confidence === 'possible') results.possible++;
+
+    if (claim.confidence === 'confirmed') {
+      console.log(`  #${job.id} INJECTION CONFIRMED — ${job.title.slice(0, 50)}`);
     }
   }
 
@@ -213,15 +223,32 @@ if (require.main === module) {
   const limit = Number(args.find((a) => /^\d+$/.test(a))) || 5;
   const sourceFlag = args.indexOf('--source');
   const source = sourceFlag !== -1 ? args[sourceFlag + 1] : undefined;
+  const cFlag = args.indexOf('--concurrency');
+  const concurrency = cFlag !== -1 ? Number(args[cFlag + 1]) : 6;
   // Set exitCode rather than calling process.exit(): a hard exit while the
   // SQLite handle is still open crashes libuv on Windows.
-  run({ limit, source })
-    .then(({ analyzed, failed, confirmed, possible, discarded }) => {
+  run({ limit, source, concurrency })
+    .then(({ analyzed, failed, confirmed, possible, discarded, errors }) => {
       console.log(`\nAnalyzed ${analyzed}, failed ${failed}.`);
       console.log(
         `Injection claims — confirmed: ${confirmed}, possible: ${possible}, ` +
           `discarded as unfounded: ${discarded}`,
       );
+
+      if (errors.length) {
+        // Group failures — 160 rows failing for one reason is a very different
+        // problem from 160 distinct ones, and the fix differs accordingly.
+        const byReason = {};
+        for (const e of errors) {
+          const key = (e.message || '').split('\n')[0].slice(0, 90);
+          byReason[key] = (byReason[key] || 0) + 1;
+        }
+        console.log('\nfailures by cause:');
+        Object.entries(byReason)
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([reason, n]) => console.log(`  ${String(n).padStart(4)}  ${reason}`));
+      }
+
       if (failed > 0) process.exitCode = 1;
     })
     .catch((err) => {

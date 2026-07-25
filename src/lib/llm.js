@@ -49,7 +49,18 @@ function getClient() {
     );
   }
 
-  _client = new OpenAI({ apiKey: process.env.NVIDIA_API_KEY, baseURL: BASE_URL });
+  // maxRetries defaults to 2, which is not enough here. Running agents
+  // concurrently, a long batch sustains a few requests per second and trips
+  // NVIDIA's per-minute quota partway through: a 268-job run failed 164 rows,
+  // while the same concurrency over 20 rows failed none. The SDK retries 429s
+  // with exponential backoff, so raising the ceiling absorbs the throttling
+  // rather than dropping the work.
+  _client = new OpenAI({
+    apiKey: process.env.NVIDIA_API_KEY,
+    baseURL: BASE_URL,
+    maxRetries: 6,
+    timeout: 120_000,
+  });
   return _client;
 }
 

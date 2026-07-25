@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../db');
 const { askForJson, MODELS } = require('../lib/llm');
+const { mapPool } = require('../lib/pool');
 
 const PROFILE_PATH = path.join(__dirname, '../profile/profile.json');
 
@@ -146,34 +147,45 @@ async function scoreOne(job, profile) {
   return { score, status, data };
 }
 
-async function run({ limit = 10 } = {}) {
+async function run({ limit = 10, concurrency = 6 } = {}) {
   const profile = loadProfile();
   const jobs = selectAnalyzed.all(limit);
   const results = { scored: 0, shortlisted: 0, failed: 0, errors: [] };
 
-  for (const job of jobs) {
-    try {
-      const { score, status, data } = await scoreOne(job, profile);
-      results.scored++;
-      if (status === 'scored_in') results.shortlisted++;
-      const mark = status === 'scored_in' ? '✓' : ' ';
-      console.log(
-        `  ${mark} ${score.toFixed(2)}  ${job.title.slice(0, 52).padEnd(52)} @ ${(job.company || '').slice(0, 22)}`,
-      );
-    } catch (err) {
-      // Leave the row analyzed so the next run retries it.
+  const outcomes = await mapPool(
+    jobs,
+    concurrency,
+    (job) => scoreOne(job, profile),
+    (done, total) => {
+      if (done % 25 === 0 || done === total) console.log(`    ...${done}/${total}`);
+    },
+  );
+
+  for (let i = 0; i < outcomes.length; i++) {
+    const job = jobs[i];
+    const o = outcomes[i];
+
+    if (o.status === 'error') {
+      // Row stays 'analyzed' so the next run retries it.
       results.failed++;
-      results.errors.push({ id: job.id, message: err.message });
-      console.error(`    !!  #${job.id} failed: ${err.message}`);
+      results.errors.push({ id: job.id, message: o.error.message });
+      continue;
     }
+
+    results.scored++;
+    if (o.value.status === 'scored_in') results.shortlisted++;
   }
 
   return results;
 }
 
 if (require.main === module) {
-  const limit = Number(process.argv[2]) || 10;
-  run({ limit })
+  const args = process.argv.slice(2);
+  const limit = Number(args.find((a) => /^\d+$/.test(a))) || 10;
+  const cFlag = args.indexOf('--concurrency');
+  const concurrency = cFlag !== -1 ? Number(args[cFlag + 1]) : 6;
+
+  run({ limit, concurrency })
     .then(({ scored, shortlisted, failed }) => {
       console.log(`\nScored ${scored}, shortlisted ${shortlisted}, failed ${failed}.`);
       if (failed > 0) process.exitCode = 1;
