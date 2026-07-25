@@ -9,3 +9,6 @@ data/*.sqlite
 data/*.db
 src/profile/profile.json
 data/base_resume.pdf
+
+# Playwright session state for CV Tailor — contains live login cookies
+data/cv-tailor-auth.json
