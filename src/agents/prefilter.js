@@ -51,6 +51,52 @@ const SENIOR_TITLE =
 const JUNIOR_SIGNAL =
   /\b(junior|jr\.?|entry[- ]level|new grad(uate)?|intern(ship)?|apprentice(ship)?|trainee|early career|all levels|graduate program|0[-–]2 years|1[-–]3 years)\b/i;
 
+// Accents are stripped before matching. "México" and "Mexico" must compare
+// equal — an earlier version of a location check missed accented Spanish
+// entirely and silently mis-sorted LatAm postings.
+const fold = (s) =>
+  (s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+
+// Words that describe a working arrangement rather than a place. "Remote" on
+// its own is open to anyone; "Remote, India" is not. A plain substring match
+// treats them the same and lets region-locked jobs through — which it did,
+// leaving Bangalore roles on the shortlist after the rule was first added.
+const ARRANGEMENT_ONLY =
+  /^(remote|anywhere(\s+in\s+the\s+world)?|worldwide|global|distributed|flexible|hybrid|on-?site|full[-\s]?time|part[-\s]?time|contract)$/;
+
+/**
+ * Is this posting somewhere the candidate could actually work from?
+ *
+ * A posting with no location is kept: most Hacker News entries state it in the
+ * body rather than a field, and rejecting on missing data would throw away
+ * good roles.
+ *
+ * When places *are* named, one eligible place is enough — "Remote, Brazil;
+ * Remote, Mexico; Remote, United States" is workable on the strength of Mexico
+ * alone.
+ */
+function locationIsEligible(location, profile) {
+  if (!location || !location.trim()) return true;
+
+  const eligible = profile.targeting.work_regions_eligible;
+  if (!Array.isArray(eligible) || eligible.length === 0) return true;
+
+  const parts = fold(location)
+    .split(/[,/|;]|\s+[-–—]\s+|\bor\b/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const places = parts.filter((p) => !ARRANGEMENT_ONLY.test(p));
+
+  // Only an arrangement was given ("Remote", "Anywhere in the World").
+  if (places.length === 0) return true;
+
+  return places.some((place) => eligible.some((region) => place.includes(fold(region))));
+}
+
 function classify(job, profile) {
   const title = (job.title || '').trim();
   const description = job.raw_description || '';
@@ -60,6 +106,10 @@ function classify(job, profile) {
 
   if (!title || PLACEHOLDER_TITLE.test(title)) {
     return { keep: false, reason: 'placeholder or non-job listing' };
+  }
+
+  if (!locationIsEligible(job.location, profile)) {
+    return { keep: false, reason: `location not workable: ${job.location}` };
   }
 
   const titleLooksTech = TECH_TITLE.test(title);
@@ -87,9 +137,19 @@ function classify(job, profile) {
 }
 
 const selectDiscovered = db.prepare(`
-  SELECT id, title, raw_description
+  SELECT id, title, location, raw_description
   FROM jobs
   WHERE status = 'discovered'
+  ORDER BY id
+`);
+
+// Rows that already moved past 'discovered'. Needed when a rule is added after
+// data was processed — as happened when a location rule arrived only once a
+// finished shortlist showed jobs that couldn't be worked from.
+const selectAlreadyProcessed = db.prepare(`
+  SELECT id, title, location, raw_description, status
+  FROM jobs
+  WHERE status NOT IN ('discovered', 'rules_rejected')
   ORDER BY id
 `);
 
@@ -101,12 +161,12 @@ const reject = db.prepare(`
 
 const recordTransition = db.prepare(`
   INSERT INTO job_status_history (job_id, from_status, to_status, reason)
-  VALUES (?, 'discovered', 'rules_rejected', ?)
+  VALUES (?, ?, 'rules_rejected', ?)
 `);
 
-function run({ dryRun = false } = {}) {
+function run({ dryRun = false, recheck = false } = {}) {
   const profile = loadProfile();
-  const jobs = selectDiscovered.all();
+  const jobs = recheck ? selectAlreadyProcessed.all() : selectDiscovered.all();
   const byReason = {};
   let kept = 0;
 
@@ -119,7 +179,7 @@ function run({ dryRun = false } = {}) {
     byReason[reason] = (byReason[reason] || 0) + 1;
     if (!dryRun) {
       reject.run(reason, job.id);
-      recordTransition.run(job.id, reason);
+      recordTransition.run(job.id, job.status || 'discovered', reason);
     }
   }
 
@@ -128,9 +188,12 @@ function run({ dryRun = false } = {}) {
 
 if (require.main === module) {
   const dryRun = process.argv.includes('--dry-run');
+  const recheck = process.argv.includes('--recheck');
   try {
-    const { examined, kept, rejected, byReason } = run({ dryRun });
-    console.log(`${dryRun ? '[dry run] ' : ''}Examined ${examined} jobs.`);
+    const { examined, kept, rejected, byReason } = run({ dryRun, recheck });
+    console.log(
+      `${dryRun ? '[dry run] ' : ''}Examined ${examined} ${recheck ? 'already-processed' : ''} jobs.`,
+    );
     console.log(`  kept:     ${kept}`);
     console.log(`  rejected: ${rejected}`);
     for (const [reason, count] of Object.entries(byReason).sort((a, b) => b[1] - a[1])) {
