@@ -21,6 +21,7 @@
 //   Jobicy         (medical, project management). Revisit if volume is needed.
 
 module.exports = [
+  require('./companyboards'),
   require('./hackernews'),
   require('./getonbrd'),
   require('./weworkremotely'),

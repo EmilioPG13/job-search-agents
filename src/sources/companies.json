@@ -1,0 +1,21 @@
+{
+  "_comment": "Companies whose job boards to watch. This is the highest-quality source in the project: every listing is real, current, and posted by the employer, because it comes straight off their applicant tracking system. Edit this list — it is the whole point. Find a company's token in its careers-page URL: boards.greenhouse.io/TOKEN or jobs.lever.co/TOKEN.",
+
+  "_verified": "All entries below returned jobs on 2026-07-24. Set enabled:false to skip one without deleting it.",
+
+  "greenhouse": [
+    { "token": "wizeline", "label": "Wizeline (Mexico — Guadalajara, CDMX)", "enabled": true },
+    { "token": "bitso", "label": "Bitso (Mexico — crypto)", "enabled": true },
+    { "token": "gitlab", "label": "GitLab (all-remote)", "enabled": true },
+    { "token": "vercel", "label": "Vercel (remote-friendly)", "enabled": true },
+    { "token": "duolingo", "label": "Duolingo", "enabled": true },
+    { "token": "grafanalabs", "label": "Grafana Labs (remote-first)", "enabled": true },
+    { "token": "doximity", "label": "Doximity (remote-first)", "enabled": true },
+
+    { "token": "stripe", "label": "Stripe (536 roles — large, mostly senior US)", "enabled": false },
+    { "token": "cloudflare", "label": "Cloudflare (271 roles)", "enabled": false },
+    { "token": "elastic", "label": "Elastic (204 roles)", "enabled": false }
+  ],
+
+  "lever": []
+}
