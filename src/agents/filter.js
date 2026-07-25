@@ -86,7 +86,7 @@ const SCHEMA = {
 };
 
 const selectAnalyzed = db.prepare(`
-  SELECT id, title, company, location, source, extracted_requirements
+  SELECT id, title, company, location, source, tags, posted_at, extracted_requirements
   FROM jobs
   WHERE status = 'analyzed'
   ORDER BY id
@@ -107,6 +107,63 @@ const recordTransition = db.prepare(`
 // Below this a job isn't worth tailoring a CV for. Deliberately low — the cost
 // of a borderline keep is one more row on your review screen.
 const SHORTLIST_THRESHOLD = 0.5;
+
+const SENIOR_LEVELS = ['senior', 'lead', 'principal', 'staff', 'expert'];
+const STALE_AFTER_DAYS = 45;
+
+/**
+ * Deterministic corrections applied after the model scores a job.
+ *
+ * Two failures showed up when the first full shortlist was audited, and both
+ * were the model being asked to weigh facts rather than judge them:
+ *
+ *   33 of 98 shortlisted jobs were tagged senior or expert yet scored 0.7+.
+ *   For one, the model wrote "no restriction on junior experience" about a
+ *   posting explicitly labelled senior by its own job board.
+ *
+ *   27 of 98 were over two months old and almost certainly filled, because
+ *   nothing in the prompt knew what today's date is.
+ *
+ * Seniority and posting age are facts already on the row. Checking them in
+ * code is cheaper, cannot be argued with, and leaves the model to do the part
+ * that genuinely needs judgment.
+ */
+function applyRules(score, job, requirements, profile) {
+  const adjustments = [];
+  let adjusted = score;
+
+  const wantsJunior = ['junior', 'intern', 'entry'].includes(
+    (profile.targeting.seniority || '').toLowerCase(),
+  );
+
+  // The source's own seniority label beats anything inferred from prose.
+  const sourceTags = JSON.parse(job.tags || '[]').map((t) => String(t).toLowerCase());
+  const level = sourceTags.find((t) => SENIOR_LEVELS.includes(t))
+    || (SENIOR_LEVELS.includes(requirements.seniority) ? requirements.seniority : null);
+
+  if (wantsJunior && level) {
+    // Capped rather than zeroed: a senior posting is a poor fit, not a
+    // different profession, and some do hire below the advertised level.
+    const cap = 0.35;
+    if (adjusted > cap) {
+      adjustments.push(`capped at ${cap} — posting is ${level} level`);
+      adjusted = cap;
+    }
+  }
+
+  if (job.posted_at) {
+    const ageDays = Math.floor((Date.now() - new Date(job.posted_at).getTime()) / 86_400_000);
+    if (Number.isFinite(ageDays) && ageDays > STALE_AFTER_DAYS) {
+      // Linear decay rather than a cliff — a 50-day-old posting is worth
+      // slightly less than a fresh one, not nothing.
+      const penalty = Math.min(0.4, ((ageDays - STALE_AFTER_DAYS) / 120) * 0.4);
+      adjustments.push(`-${penalty.toFixed(2)} — posted ${ageDays} days ago`);
+      adjusted = Math.max(0, adjusted - penalty);
+    }
+  }
+
+  return { score: Number(adjusted.toFixed(2)), adjustments };
+}
 
 async function scoreOne(job, profile) {
   const requirements = JSON.parse(job.extracted_requirements);
@@ -138,11 +195,23 @@ async function scoreOne(job, profile) {
   });
 
   // Clamp: a model can return 1.4 or -0.2 even under a schema.
-  const score = Math.max(0, Math.min(1, Number(data.fit_score) || 0));
+  const modelScore = Math.max(0, Math.min(1, Number(data.fit_score) || 0));
+  const { score, adjustments } = applyRules(modelScore, job, requirements, profile);
+
+  // Keep both numbers so a surprising ranking can be traced back to whether
+  // the model or the rules produced it.
+  data.model_score = modelScore;
+  data.fit_score = score;
+  data.rule_adjustments = adjustments;
+
   const status = score >= SHORTLIST_THRESHOLD ? 'scored_in' : 'scored_out';
 
   saveScore.run(score, JSON.stringify(data), status, job.id);
-  recordTransition.run(job.id, status, `fit ${score.toFixed(2)} — ${data.verdict}`);
+  recordTransition.run(
+    job.id,
+    status,
+    `fit ${score.toFixed(2)}${adjustments.length ? ' (' + adjustments.join('; ') + ')' : ''}`,
+  );
 
   return { score, status, data };
 }
