@@ -9,27 +9,9 @@
 // intend to apply to — running it over all 68 shortlisted jobs would burn time
 // on applications you'll never send.
 
-const fs = require('fs');
-const path = require('path');
 const db = require('../db');
 const { tailor, getToken, hasSavedLogin } = require('../lib/cvTailor');
-
-const CV_PATH = path.join(__dirname, '../../data/base_cv.txt');
-
-function loadCv() {
-  if (!fs.existsSync(CV_PATH)) {
-    throw new Error(
-      `No CV found at data/base_cv.txt.\n` +
-        `  Paste your CV there as plain text. It is gitignored, and doubles as\n` +
-        `  the ground truth the Verify agent checks tailored output against.`,
-    );
-  }
-  const cv = fs.readFileSync(CV_PATH, 'utf8').trim();
-  if (cv.length < 100) {
-    throw new Error('data/base_cv.txt looks too short to be a real CV.');
-  }
-  return cv;
-}
+const { cvForPosting, loadProfile } = require('../lib/cvSource');
 
 const selectById = db.prepare(`
   SELECT id, title, company, url, raw_description, fit_score, status
@@ -80,11 +62,16 @@ function extractParts(response) {
   };
 }
 
-async function tailorOne(job, cv, token) {
+async function tailorOne(job, profile, token) {
+  // Language is decided per posting, not per run: a batch can mix a Spanish
+  // Get on Board role with an English Hacker News one.
+  const cv = cvForPosting(job.raw_description, { profile });
+
   const response = await tailor({
-    cv,
+    cv: cv.text,
     jobDescription: job.raw_description,
     token,
+    language: cv.language,
   });
 
   const { tailoredCv, coverLetter } = extractParts(response);
@@ -98,9 +85,9 @@ async function tailorOne(job, cv, token) {
   }
 
   saveTailored.run(tailoredCv, coverLetter, job.id);
-  recordTransition.run(job.id, job.status, `tailored via CV Tailor service`);
+  recordTransition.run(job.id, job.status, `tailored via CV Tailor service (${cv.language})`);
 
-  return { tailoredCv, coverLetter, response };
+  return { tailoredCv, coverLetter, response, language: cv.language };
 }
 
 async function run({ ids = [], top = 0 } = {}) {
@@ -108,7 +95,7 @@ async function run({ ids = [], top = 0 } = {}) {
     throw new Error('Not signed in to CV Tailor. Run: npm run cvtailor:login');
   }
 
-  const cv = loadCv();
+  const profile = loadProfile();
 
   const jobs = ids.length
     ? ids.map((id) => selectById.get(id)).filter(Boolean)
@@ -128,9 +115,9 @@ async function run({ ids = [], top = 0 } = {}) {
   for (const job of jobs) {
     process.stdout.write(`  #${job.id} ${job.title.slice(0, 50)} … `);
     try {
-      const { coverLetter } = await tailorOne(job, cv, token);
+      const { coverLetter, language } = await tailorOne(job, profile, token);
       results.tailored++;
-      console.log(`done${coverLetter ? ' (+ cover letter)' : ''}`);
+      console.log(`done [${language}]${coverLetter ? ' (+ cover letter)' : ''}`);
     } catch (err) {
       results.failed++;
       console.log(`FAILED\n      ${err.message}`);
@@ -158,4 +145,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { run, tailorOne, extractParts, loadCv };
+module.exports = { run, tailorOne, extractParts };

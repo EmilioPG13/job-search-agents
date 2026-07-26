@@ -22,23 +22,10 @@
 //   here — in both directions, since a *missed* fabrication is the dangerous
 //   failure.
 
-const fs = require('fs');
-const path = require('path');
 const db = require('../db');
 const { askForJson, MODELS } = require('../lib/llm');
 const { mapPool } = require('../lib/pool');
-
-const CV_PATH = path.join(__dirname, '../../data/base_cv.txt');
-
-function loadGroundTruth() {
-  if (!fs.existsSync(CV_PATH)) {
-    throw new Error(
-      'No CV at data/base_cv.txt — there is nothing to verify against.\n' +
-        '  Verification without ground truth would be theatre.',
-    );
-  }
-  return fs.readFileSync(CV_PATH, 'utf8').trim();
-}
+const { cvForPosting, detectLanguage, loadProfile } = require('../lib/cvSource');
 
 const SYSTEM = `You audit a tailored CV against the candidate's real CV.
 
@@ -201,9 +188,11 @@ function keepGroundedClaims(data, tailoredCv) {
   return { kept: kept.length, critical, discarded };
 }
 
+// raw_description is selected so the ground-truth CV can be chosen in the same
+// language the tailoring used.
 const selectTailored = db.prepare(`
   SELECT id, title, company, tailored_resume, extracted_requirements,
-         flagged_injection_notes, status
+         flagged_injection_notes, raw_description, status
   FROM jobs
   WHERE status = 'tailored'
   ORDER BY fit_score DESC
@@ -212,7 +201,7 @@ const selectTailored = db.prepare(`
 
 const selectOne = db.prepare(`
   SELECT id, title, company, tailored_resume, extracted_requirements,
-         flagged_injection_notes, status
+         flagged_injection_notes, raw_description, status
   FROM jobs WHERE id = ?
 `);
 
@@ -228,9 +217,29 @@ const recordTransition = db.prepare(`
   VALUES (?, 'tailored', ?, ?)
 `);
 
-async function verifyOne(job, groundTruth) {
+/**
+ * @param {object} job
+ * @param {string|object} [source]  Ground-truth CV text, or a profile to pick
+ *   one from. Passing text directly is what the self-test does; in normal use
+ *   the language is chosen from the posting so the audit compares like with
+ *   like. Auditing a Spanish CV against the English original would report
+ *   every line as unsupported.
+ */
+async function verifyOne(job, source) {
   if (!job.tailored_resume) {
     throw new Error('no tailored CV stored for this job');
+  }
+
+  let groundTruth;
+  let language = 'en';
+
+  if (typeof source === 'string') {
+    groundTruth = source;
+    language = detectLanguage(source);
+  } else {
+    const cv = cvForPosting(job.raw_description || job.tailored_resume, { profile: source });
+    groundTruth = cv.text;
+    language = cv.language;
   }
 
   const requirements = job.extracted_requirements
@@ -248,6 +257,8 @@ async function verifyOne(job, groundTruth) {
     model: MODELS.STRONG,
     maxTokens: 6000,
   });
+
+  data.verified_against_language = language;
 
   const counts = keepGroundedClaims(data, job.tailored_resume);
 
@@ -276,7 +287,7 @@ async function verifyOne(job, groundTruth) {
 }
 
 async function run({ ids = [], limit = 10, concurrency = 3 } = {}) {
-  const groundTruth = loadGroundTruth();
+  const profile = loadProfile();
 
   const jobs = ids.length
     ? ids.map((id) => selectOne.get(id)).filter(Boolean)
@@ -289,7 +300,7 @@ async function run({ ids = [], limit = 10, concurrency = 3 } = {}) {
 
   const results = { verified: 0, failed: 0, errored: 0 };
 
-  const outcomes = await mapPool(jobs, concurrency, (job) => verifyOne(job, groundTruth));
+  const outcomes = await mapPool(jobs, concurrency, (job) => verifyOne(job, profile));
 
   for (let i = 0; i < outcomes.length; i++) {
     const job = jobs[i];

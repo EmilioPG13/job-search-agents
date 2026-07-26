@@ -14,5 +14,5 @@ data/base_resume.pdf
 data/cv-tailor-auth.json
 
 # Your CV in plain text — personal data, and the ground truth for verification
-data/base_cv.txt
+data/base_cv*.txt
 data/applications/

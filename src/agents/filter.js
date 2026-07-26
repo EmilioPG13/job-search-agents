@@ -111,6 +111,44 @@ const SHORTLIST_THRESHOLD = 0.5;
 const SENIOR_LEVELS = ['senior', 'lead', 'principal', 'staff', 'expert'];
 const STALE_AFTER_DAYS = 45;
 
+/** Compare on a normalised name so "Node.js" matches "nodejs" and "node js". */
+const skillKey = (s) => String(s).toLowerCase().replace(/[.\s_/-]/g, '');
+
+/**
+ * How much of what the posting asks for does the candidate actually have?
+ *
+ * A fact, computed here rather than left to the model, and recorded on the row
+ * so a ranking can be explained afterwards. Whether an overlap of 2/5 makes a
+ * job worth applying to is a judgment, and that part stays with the model.
+ */
+function skillOverlap(requiredSkills, profileSkills) {
+  const required = (requiredSkills || []).filter(Boolean);
+  if (required.length === 0) return null;
+
+  const have = new Set(profileSkills.map((s) => skillKey(s.name)));
+
+  const matched = required.filter((req) => {
+    const k = skillKey(req);
+
+    return [...have].some((h) => {
+      if (h === k) return true;
+      // Substring both ways, so a posting's "React.js" matches "React" and
+      // "TypeScript/React" matches either — but only for names long enough
+      // that a coincidence is unlikely. Without the length floor, a posting
+      // requiring "Go" matched because "go" appears inside "mongodb".
+      const shorter = h.length < k.length ? h : k;
+      if (shorter.length < 4) return false;
+      return k.includes(h) || h.includes(k);
+    });
+  });
+
+  return {
+    matched,
+    missing: required.filter((r) => !matched.includes(r)),
+    ratio: Number((matched.length / required.length).toFixed(2)),
+  };
+}
+
 /**
  * Deterministic corrections applied after the model scores a job.
  *
@@ -165,13 +203,42 @@ function applyRules(score, job, requirements, profile) {
   return { score: Number(adjusted.toFixed(2)), adjustments };
 }
 
+/**
+ * Describe the candidate's skills to the model, keeping the distinction
+ * between what is claimed and what is demonstrable. A skill backed by public
+ * repos is stronger evidence than one listed on a CV, and the model should be
+ * able to weigh that.
+ */
+function describeSkills(profile) {
+  const skills = profile.ground_truth?.skills || [];
+  if (skills.length === 0) return null;
+
+  const label = (s) =>
+    s.source === 'both' || s.source === 'github'
+      ? `${s.name} (demonstrated in public repos)`
+      : s.name;
+
+  return skills.map(label).join(', ');
+}
+
 async function scoreOne(job, profile) {
   const requirements = JSON.parse(job.extracted_requirements);
   const t = profile.targeting;
+  const g = profile.ground_truth || {};
+
+  const skillList = describeSkills(profile);
 
   const criteria = [
     `Target roles: ${t.target_roles.join(', ')}`,
     `Experience level: ${t.seniority}`,
+    skillList ? `Skills the candidate actually has: ${skillList}` : null,
+    g.years_hands_on
+      ? `Hands-on experience: about ${g.years_hands_on} years — ${g.software_experience_type}. ` +
+        `Treat a posting asking for 2-3 years as a genuine match, not a stretch.`
+      : null,
+    (g.spoken_languages || []).length
+      ? `Spoken languages: ${g.spoken_languages.map((l) => `${l.language} (${l.level})`).join(', ')}`
+      : null,
     `Work mode: ${(t.work_mode || []).join(', ') || 'any'}`,
     t.min_salary ? `Minimum salary: ${t.min_salary} ${t.salary_currency}` : 'No salary floor',
     t.filter_by_region
@@ -197,6 +264,15 @@ async function scoreOne(job, profile) {
   // Clamp: a model can return 1.4 or -0.2 even under a schema.
   const modelScore = Math.max(0, Math.min(1, Number(data.fit_score) || 0));
   const { score, adjustments } = applyRules(modelScore, job, requirements, profile);
+
+  // Recorded rather than applied: the overlap explains a ranking without
+  // second-guessing the model's judgment of how much it matters.
+  const overlap = skillOverlap(requirements.required_skills, profile.ground_truth?.skills || []);
+  if (overlap) {
+    data.skill_overlap = overlap.ratio;
+    data.skills_matched = overlap.matched;
+    data.skills_missing = overlap.missing;
+  }
 
   // Keep both numbers so a surprising ranking can be traced back to whether
   // the model or the rules produced it.

@@ -15,7 +15,8 @@
     "cvtailor:check": "node src/tools/cv-tailor-check.js",
     "tailor": "node src/agents/tailor.js",
     "verify": "node src/agents/verify.js",
-    "review": "node src/tools/review.js"
+    "review": "node src/tools/review.js",
+    "sync:github": "node src/tools/sync-github-skills.js"
   },
   "engines": {
     "node": ">=22.5.0"
