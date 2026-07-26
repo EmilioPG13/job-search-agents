@@ -5,7 +5,7 @@
 // profile) and the Tailor (writes the resume). Extract once, reuse twice.
 
 const db = require('../db');
-const { askForJson, MODELS } = require('../lib/llm');
+const { askForJson, MODELS, rateLimiter } = require('../lib/llm');
 const { detectSuspiciousInstructions } = require('../lib/promptSafety');
 const { mapPool } = require('../lib/pool');
 
@@ -189,7 +189,11 @@ async function run({ limit = 5, source, concurrency = 6 } = {}) {
     concurrency,
     (job) => analyzeOne(job),
     (done, total) => {
-      if (done % 25 === 0 || done === total) console.log(`    ...${done}/${total}`);
+      // Rate is shown because NIM is slow by nature: without it a paced run
+      // looks identical to a hung one.
+      if (done % 25 === 0 || done === total) {
+        console.log(`    ...${done}/${total}  (${rateLimiter.currentRate()}/min)`);
+      }
     },
   );
 
@@ -234,6 +238,13 @@ if (require.main === module) {
         `Injection claims — confirmed: ${confirmed}, possible: ${possible}, ` +
           `discarded as unfounded: ${discarded}`,
       );
+      const p = rateLimiter.report();
+      if (p.granted) {
+        console.log(
+          `Pacing: ${p.granted} requests, limit ${p.limit}/min, ` +
+            `average wait ${p.averageWaitMs}ms, longest ${p.longestWaitMs}ms.`,
+        );
+      }
 
       if (errors.length) {
         // Group failures — 160 rows failing for one reason is a very different

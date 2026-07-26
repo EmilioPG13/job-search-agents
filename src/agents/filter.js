@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('../db');
-const { askForJson, MODELS } = require('../lib/llm');
+const { askForJson, MODELS, rateLimiter } = require('../lib/llm');
 const { mapPool } = require('../lib/pool');
 
 const PROFILE_PATH = path.join(__dirname, '../profile/profile.json');
@@ -302,7 +302,11 @@ async function run({ limit = 10, concurrency = 6 } = {}) {
     concurrency,
     (job) => scoreOne(job, profile),
     (done, total) => {
-      if (done % 25 === 0 || done === total) console.log(`    ...${done}/${total}`);
+      // Rate is shown because NIM is slow by nature: without it a paced run
+      // looks identical to a hung one.
+      if (done % 25 === 0 || done === total) {
+        console.log(`    ...${done}/${total}  (${rateLimiter.currentRate()}/min)`);
+      }
     },
   );
 
@@ -331,8 +335,32 @@ if (require.main === module) {
   const concurrency = cFlag !== -1 ? Number(args[cFlag + 1]) : 6;
 
   run({ limit, concurrency })
-    .then(({ scored, shortlisted, failed }) => {
+    .then(({ scored, shortlisted, failed, errors }) => {
       console.log(`\nScored ${scored}, shortlisted ${shortlisted}, failed ${failed}.`);
+
+      const pacing = rateLimiter.report();
+      if (pacing.granted) {
+        console.log(
+          `Pacing: ${pacing.granted} requests, cap ${pacing.limit}/min, ` +
+            `average wait ${pacing.averageWaitMs}ms, longest ${pacing.longestWaitMs}ms.`,
+        );
+      }
+
+      if (errors.length) {
+        // Grouped by cause: many rows failing for one reason is a different
+        // problem from many failing for many reasons, and a bare count hides
+        // which one you have.
+        const byReason = {};
+        for (const e of errors) {
+          const key = (e.message || '').split('\n')[0].slice(0, 90);
+          byReason[key] = (byReason[key] || 0) + 1;
+        }
+        console.log('\nfailures by cause:');
+        Object.entries(byReason)
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([reason, n]) => console.log(`  ${String(n).padStart(4)}  ${reason}`));
+      }
+
       if (failed > 0) process.exitCode = 1;
     })
     .catch((err) => {

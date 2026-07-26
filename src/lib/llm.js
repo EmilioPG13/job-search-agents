@@ -22,6 +22,7 @@
 
 const OpenAI = require('openai');
 const { UNTRUSTED_CONTENT_BOUNDARY, wrapUntrustedContent } = require('./promptSafety');
+const { shared: rateLimiter } = require('./rateLimit');
 require('dotenv').config();
 
 const BASE_URL = process.env.NIM_BASE_URL || 'https://integrate.api.nvidia.com/v1';
@@ -60,17 +61,21 @@ function getClient() {
     );
   }
 
-  // maxRetries defaults to 2, which is not enough here. Running agents
-  // concurrently, a long batch sustains a few requests per second and trips
-  // NVIDIA's per-minute quota partway through: a 268-job run failed 164 rows,
-  // while the same concurrency over 20 rows failed none. The SDK retries 429s
-  // with exponential backoff, so raising the ceiling absorbs the throttling
-  // rather than dropping the work.
+  // Timeout is generous on purpose. On NIM's free tier a request is often
+  // slow rather than broken: meta/llama-3.3-70b-instruct was measured at 167s
+  // for a trivial schema-constrained call. The previous 120s ceiling was
+  // killing requests that would have succeeded, and each kill cost the full
+  // two minutes before the retry even started.
+  //
+  // Retries are correspondingly lower. 429s are now prevented by pacing
+  // (src/lib/rateLimit.js) rather than absorbed after the fact, so retries
+  // only cover genuine transient faults. Six retries against a 300s timeout
+  // would mean a single stuck row could stall a run for half an hour.
   _client = new OpenAI({
     apiKey: process.env.NVIDIA_API_KEY,
     baseURL: BASE_URL,
-    maxRetries: 6,
-    timeout: 120_000,
+    maxRetries: Number(process.env.NIM_MAX_RETRIES) || 3,
+    timeout: Number(process.env.NIM_TIMEOUT_MS) || 300_000,
   });
   return _client;
 }
@@ -147,6 +152,10 @@ async function askForJson({
   const messages = buildMessages({ system, task, untrusted, untrustedLabel });
   const base = { model, messages, temperature, max_tokens: maxTokens };
 
+  // Wait for a slot before sending. Every agent shares one budget because the
+  // quota is per API key, not per model or per process.
+  await rateLimiter.acquire();
+
   let response;
   try {
     response = await client.chat.completions.create({
@@ -162,6 +171,9 @@ async function askForJson({
     // the schema stated in the prompt — weaker, so the field check below does
     // the real work.
     console.warn(`  (${model} rejected json_schema; falling back to json_object)`);
+    // A second call needs a second slot — otherwise the fallback path quietly
+    // sends twice as many requests as the limiter accounted for.
+    await rateLimiter.acquire();
     response = await client.chat.completions.create({
       ...base,
       response_format: { type: 'json_object' },
@@ -210,4 +222,4 @@ async function askForJson({
   return { data, usage: response.usage, model: response.model || model };
 }
 
-module.exports = { MODELS, BASE_URL, askForJson, getClient };
+module.exports = { MODELS, BASE_URL, askForJson, getClient, rateLimiter };
