@@ -62,6 +62,26 @@ function extractParts(response) {
   };
 }
 
+/**
+ * Did the service stop mid-thought?
+ *
+ * Observed on a real run: the CV ended "Relevant coursework: D" and the cover
+ * letter never arrived, because the tailoring model hit its output limit.
+ * Storing that would put a half-finished document in front of a human as
+ * though it were complete, so it is treated as a failed tailoring instead.
+ */
+function looksTruncated(text) {
+  const tail = text.trimEnd().slice(-80);
+  // A finished document ends on punctuation, a closing bracket, or a complete
+  // word on its own line — not mid-word or mid-clause.
+  if (/[.!?)\]"'”]$/.test(tail)) return false;
+
+  const lastLine = tail.split('\n').pop().trim();
+  // A short trailing fragment ("Relevant coursework: D") is the tell. A long
+  // final line without punctuation is more likely a heading or a skills list.
+  return lastLine.length > 0 && lastLine.length < 40 && /[:,]|\s\w{1,2}$/.test(lastLine);
+}
+
 async function tailorOne(job, profile, token) {
   // Language is decided per posting, not per run: a batch can mix a Spanish
   // Get on Board role with an English Hacker News one.
@@ -75,6 +95,16 @@ async function tailorOne(job, profile, token) {
   });
 
   const { tailoredCv, coverLetter } = extractParts(response);
+
+  if (tailoredCv && looksTruncated(tailoredCv)) {
+    const err = new Error(
+      `The service returned a truncated CV — it ends mid-sentence: "...${tailoredCv.slice(-60).trim()}".\n` +
+        `      This is CV Tailor's own output limit, not a problem here. Raising max_tokens\n` +
+        `      on its /api/tailor route would fix it.`,
+    );
+    err.code = 'TRUNCATED';
+    throw err;
+  }
 
   if (!tailoredCv) {
     const err = new Error(

@@ -7,16 +7,40 @@
 
 const { getServiceInfo, getToken, tailor, hasSavedLogin, API_URL } = require('../lib/cvTailor');
 
+// Deliberately a realistic length. A three-line sample made the service
+// return {result: null} with a 200 status, which read as a broken integration
+// when the request shape was in fact correct — it simply had too little to
+// work with.
 const SAMPLE_CV = `Emilio Perez
-Junior Software Developer
+Junior Software Developer - Puebla, Mexico
+emilio@example.com - github.com/example
 
-EXPERIENCE
-Freelance Web Developer (2024-present)
-- Built responsive sites with React and Tailwind CSS
-- Integrated REST APIs and handled client deployments
+PROFILE
+Full-stack developer with two years of hands-on experience building React
+applications and REST APIs, gained through personal projects and a web
+development bootcamp. Comfortable across the stack, from Postgres schemas to
+component design.
+
+PROJECTS
+E-commerce API - Node.js, Express, PostgreSQL, Sequelize, JWT, Stripe, React
+- Built a full-stack platform with authentication, cart and order management
+- Integrated Stripe checkout and documented the API with Swagger
+
+Reddit Lite - React, Vite, Tailwind CSS
+- Lightweight Reddit client with subreddit browsing and post search
+
+WORK EXPERIENCE
+Medical Interpreter - Language Services Associates (2019 - present)
+- Real-time English-Spanish interpretation for U.S. clinical clients
+- Managed scheduling and client communication as a remote contractor
+
+EDUCATION
+B.S. Computer Science (in progress) - IU International University
+Web Development Bootcamp - DEV.F, 2021-2022
 
 SKILLS
-JavaScript, React, Node.js, Express, SQL, Git`;
+JavaScript, TypeScript, Python, SQL, React, Node.js, Express, PostgreSQL,
+MongoDB, Tailwind CSS, Vite, Git, REST APIs`;
 
 const SAMPLE_JD = `Junior Full-Stack Developer (Remote)
 
