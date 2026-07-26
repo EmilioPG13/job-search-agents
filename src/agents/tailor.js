@@ -1,0 +1,161 @@
+// Tailor agent — sends your CV and a job posting to the CV Tailor service and
+// stores what comes back.
+//
+//   npm run tailor -- 407        one job by id
+//   npm run tailor -- --top 3    the three highest-scoring untailored jobs
+//
+// On demand rather than batch, deliberately. Tailoring is slow, CV Tailor
+// sleeps on Render's free tier, and you only tailor for jobs you actually
+// intend to apply to — running it over all 68 shortlisted jobs would burn time
+// on applications you'll never send.
+
+const fs = require('fs');
+const path = require('path');
+const db = require('../db');
+const { tailor, getToken, hasSavedLogin } = require('../lib/cvTailor');
+
+const CV_PATH = path.join(__dirname, '../../data/base_cv.txt');
+
+function loadCv() {
+  if (!fs.existsSync(CV_PATH)) {
+    throw new Error(
+      `No CV found at data/base_cv.txt.\n` +
+        `  Paste your CV there as plain text. It is gitignored, and doubles as\n` +
+        `  the ground truth the Verify agent checks tailored output against.`,
+    );
+  }
+  const cv = fs.readFileSync(CV_PATH, 'utf8').trim();
+  if (cv.length < 100) {
+    throw new Error('data/base_cv.txt looks too short to be a real CV.');
+  }
+  return cv;
+}
+
+const selectById = db.prepare(`
+  SELECT id, title, company, url, raw_description, fit_score, status
+  FROM jobs WHERE id = ?
+`);
+
+const selectTopUntailored = db.prepare(`
+  SELECT id, title, company, url, raw_description, fit_score, status
+  FROM jobs
+  WHERE status = 'scored_in'
+  ORDER BY fit_score DESC
+  LIMIT ?
+`);
+
+const saveTailored = db.prepare(`
+  UPDATE jobs
+  SET tailored_resume = ?, cover_letter = ?, status = 'tailored',
+      updated_at = datetime('now')
+  WHERE id = ?
+`);
+
+const recordTransition = db.prepare(`
+  INSERT INTO job_status_history (job_id, from_status, to_status, reason)
+  VALUES (?, ?, 'tailored', ?)
+`);
+
+/**
+ * The service returns prose sections rather than a fixed schema, and the exact
+ * field names are whatever the deployed version sends. Rather than guessing,
+ * try the likely keys and fall back to splitting the combined text on the
+ * section headings its prompt produces.
+ */
+function extractParts(response) {
+  const pick = (...keys) => keys.map((k) => response[k]).find((v) => typeof v === 'string' && v.trim());
+
+  const cv = pick('tailoredCv', 'tailored_cv', 'cv', 'resume', 'tailoredResume');
+  const letter = pick('coverLetter', 'cover_letter', 'letter');
+  if (cv) return { tailoredCv: cv, coverLetter: letter || null };
+
+  // Combined blob: split on the headings the service's prompt asks for.
+  const blob = pick('result', 'text', 'output', 'content', 'raw');
+  if (!blob) return { tailoredCv: null, coverLetter: null };
+
+  const split = blob.split(/\n\s*#*\s*COVER\s+LETTER\s*#*\s*\n/i);
+  return {
+    tailoredCv: split[0].replace(/^\s*#*\s*TAILORED\s+CV\s*#*\s*\n/i, '').trim(),
+    coverLetter: split[1] ? split[1].trim() : null,
+  };
+}
+
+async function tailorOne(job, cv, token) {
+  const response = await tailor({
+    cv,
+    jobDescription: job.raw_description,
+    token,
+  });
+
+  const { tailoredCv, coverLetter } = extractParts(response);
+
+  if (!tailoredCv) {
+    const err = new Error(
+      `Could not find the tailored CV in the response. Fields returned: ${Object.keys(response).join(', ')}`,
+    );
+    err.response = response;
+    throw err;
+  }
+
+  saveTailored.run(tailoredCv, coverLetter, job.id);
+  recordTransition.run(job.id, job.status, `tailored via CV Tailor service`);
+
+  return { tailoredCv, coverLetter, response };
+}
+
+async function run({ ids = [], top = 0 } = {}) {
+  if (!hasSavedLogin()) {
+    throw new Error('Not signed in to CV Tailor. Run: npm run cvtailor:login');
+  }
+
+  const cv = loadCv();
+
+  const jobs = ids.length
+    ? ids.map((id) => selectById.get(id)).filter(Boolean)
+    : selectTopUntailored.all(top || 1);
+
+  if (jobs.length === 0) {
+    console.log('No matching jobs. Shortlisted jobs are listed by: npm run shortlist');
+    return { tailored: 0, failed: 0 };
+  }
+
+  // One token for the whole run: getToken() launches a browser each call, so
+  // minting per job would open one browser per job.
+  const token = await getToken();
+
+  const results = { tailored: 0, failed: 0 };
+
+  for (const job of jobs) {
+    process.stdout.write(`  #${job.id} ${job.title.slice(0, 50)} … `);
+    try {
+      const { coverLetter } = await tailorOne(job, cv, token);
+      results.tailored++;
+      console.log(`done${coverLetter ? ' (+ cover letter)' : ''}`);
+    } catch (err) {
+      results.failed++;
+      console.log(`FAILED\n      ${err.message}`);
+    }
+  }
+
+  return results;
+}
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const topFlag = args.indexOf('--top');
+  const top = topFlag !== -1 ? Number(args[topFlag + 1]) : 0;
+  const ids = args.filter((a) => /^\d+$/.test(a)).map(Number);
+
+  run({ ids: top ? [] : ids, top })
+    .then(({ tailored, failed }) => {
+      console.log(`\nTailored ${tailored}, failed ${failed}.`);
+      if (tailored > 0) console.log('Next: npm run verify');
+      if (failed > 0) process.exitCode = 1;
+    })
+    .catch((err) => {
+      console.error(`\n${err.message}\n`);
+      process.exitCode = 1;
+    });
+}
+
+module.exports = { run, tailorOne, extractParts, loadCv };

@@ -12,7 +12,10 @@
     "score": "node src/agents/filter.js",
     "shortlist": "node src/tools/shortlist.js",
     "cvtailor:login": "node src/tools/cv-tailor-login.js",
-    "cvtailor:check": "node src/tools/cv-tailor-check.js"
+    "cvtailor:check": "node src/tools/cv-tailor-check.js",
+    "tailor": "node src/agents/tailor.js",
+    "verify": "node src/agents/verify.js",
+    "review": "node src/tools/review.js"
   },
   "engines": {
     "node": ">=22.5.0"

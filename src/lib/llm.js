@@ -29,9 +29,20 @@ const BASE_URL = process.env.NIM_BASE_URL || 'https://integrate.api.nvidia.com/v
 // Two tiers. Extraction is high-volume and mechanical; judgment work (scoring
 // fit, verifying a resume against ground truth) is lower-volume and worth a
 // bigger model. Override per-agent if a model turns out to suit a task better.
+// Measured on the free tier, 2026-07-24, on an identical schema-constrained
+// request. Speed matters here because verification runs per tailored CV:
+//
+//   mistralai/mistral-medium-3.5-128b          58s   honours json_schema
+//   meta/llama-3.3-70b-instruct               167s   honours json_schema
+//   nvidia/llama-3.3-nemotron-super-49b-v1.5    —    ignored json_schema, replied in prose
+//   deepseek-ai/deepseek-v4-flash               —    ignored json_schema, replied in prose
+//
+// The two that ignored the schema are unusable here regardless of speed, and
+// that includes the model CV Tailor itself uses — a reminder that "works in
+// their app" and "works with structured output" are different claims.
 const MODELS = {
   FAST: process.env.NIM_MODEL_FAST || 'meta/llama-3.1-8b-instruct',
-  STRONG: process.env.NIM_MODEL_STRONG || 'meta/llama-3.3-70b-instruct',
+  STRONG: process.env.NIM_MODEL_STRONG || 'mistralai/mistral-medium-3.5-128b',
 };
 
 // Built on first use, not at import. The OpenAI SDK throws in its constructor
