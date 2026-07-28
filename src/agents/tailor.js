@@ -65,10 +65,15 @@ function extractParts(response) {
 /**
  * Did the service stop mid-thought?
  *
- * Observed on a real run: the CV ended "Relevant coursework: D" and the cover
- * letter never arrived, because the tailoring model hit its output limit.
+ * The API now reports this itself via a `truncated` boolean, which is
+ * authoritative — it comes from the model's own finish_reason. This heuristic
+ * remains as a fallback for older deployments that don't send the field, and
+ * for the case the flag says false but the text plainly isn't finished.
+ *
+ * It was written against a real failure: a CV ending "Relevant coursework: D"
+ * with no cover letter, because the tailoring model hit its output limit.
  * Storing that would put a half-finished document in front of a human as
- * though it were complete, so it is treated as a failed tailoring instead.
+ * though it were complete.
  */
 function looksTruncated(text) {
   const tail = text.trimEnd().slice(-80);
@@ -96,11 +101,18 @@ async function tailorOne(job, profile, token) {
 
   const { tailoredCv, coverLetter } = extractParts(response);
 
-  if (tailoredCv && looksTruncated(tailoredCv)) {
+  // The service's own flag wins when present: it reflects the model's
+  // finish_reason rather than guessing from how the text reads.
+  const truncated =
+    typeof response.truncated === 'boolean'
+      ? response.truncated
+      : Boolean(tailoredCv && looksTruncated(tailoredCv));
+
+  if (truncated) {
     const err = new Error(
-      `The service returned a truncated CV — it ends mid-sentence: "...${tailoredCv.slice(-60).trim()}".\n` +
-        `      This is CV Tailor's own output limit, not a problem here. Raising max_tokens\n` +
-        `      on its /api/tailor route would fix it.`,
+      `The service reported a truncated result${
+        tailoredCv ? ` — ends "...${tailoredCv.slice(-50).trim()}"` : ''
+      }.\n      Raising max_tokens on CV Tailor's /api/tailor route is the fix.`,
     );
     err.code = 'TRUNCATED';
     throw err;
