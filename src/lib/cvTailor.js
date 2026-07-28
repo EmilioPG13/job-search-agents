@@ -23,13 +23,20 @@ const AUTH_STATE = path.join(__dirname, '../../data/cv-tailor-auth.json');
 const hasSavedLogin = () => fs.existsSync(AUTH_STATE);
 
 /**
- * Replay the saved session and ask Clerk for a fresh token.
+ * Replay the saved session and keep the signed-in page open, so a fresh token
+ * can be minted for each request.
+ *
+ * Clerk tokens are deliberately short-lived — about a minute — and a single
+ * tailoring call takes longer than that. Minting one token for a whole run
+ * therefore works for the first job and returns 401 for every job after it,
+ * which reads exactly like an expired login and is not one. Opening a browser
+ * per job would also fix the expiry, but pays several seconds of startup every
+ * time; holding one page open pays that once and mints in milliseconds.
  *
  * The token is minted in the page rather than read from a cookie: Clerk's
- * session cookie is not the bearer token the API expects, and getToken()
- * handles refresh for us.
+ * session cookie is not the bearer token the API expects.
  */
-async function getToken({ timeoutMs = 60_000 } = {}) {
+async function openSession({ timeoutMs = 60_000 } = {}) {
   if (!hasSavedLogin()) {
     throw new Error(
       'Not signed in to CV Tailor. Run: npm run cvtailor:login',
@@ -48,11 +55,31 @@ async function getToken({ timeoutMs = 60_000 } = {}) {
     // than assuming it is ready on load.
     await page.waitForFunction(() => window.Clerk?.session, null, { timeout: timeoutMs });
 
-    const token = await page.evaluate(() => window.Clerk.session.getToken());
-    if (!token) throw new Error('Clerk returned no token — the saved session has expired.');
-    return token;
-  } finally {
+    return {
+      // skipCache, because Clerk hands back the cached token until it is
+      // nearly expired — which is precisely the token that just failed.
+      async mintToken() {
+        const token = await page.evaluate(() =>
+          window.Clerk.session.getToken({ skipCache: true }),
+        );
+        if (!token) throw new Error('Clerk returned no token — the saved session has expired.');
+        return token;
+      },
+      close: () => browser.close(),
+    };
+  } catch (err) {
     await browser.close();
+    throw err;
+  }
+}
+
+/** A single token, for callers that make one request and stop. */
+async function getToken(opts) {
+  const session = await openSession(opts);
+  try {
+    return await session.mintToken();
+  } finally {
+    await session.close();
   }
 }
 
@@ -105,4 +132,13 @@ async function tailor({ cv, jobDescription, token, tone = 'professional', langua
   }
 }
 
-module.exports = { tailor, getToken, getServiceInfo, hasSavedLogin, APP_URL, API_URL, AUTH_STATE };
+module.exports = {
+  tailor,
+  getToken,
+  openSession,
+  getServiceInfo,
+  hasSavedLogin,
+  APP_URL,
+  API_URL,
+  AUTH_STATE,
+};

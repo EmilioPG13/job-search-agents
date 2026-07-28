@@ -10,7 +10,7 @@
 // on applications you'll never send.
 
 const db = require('../db');
-const { tailor, getToken, hasSavedLogin } = require('../lib/cvTailor');
+const { tailor, openSession, hasSavedLogin } = require('../lib/cvTailor');
 const { cvForPosting, loadProfile } = require('../lib/cvSource');
 
 const selectById = db.prepare(`
@@ -148,22 +148,27 @@ async function run({ ids = [], top = 0 } = {}) {
     return { tailored: 0, failed: 0 };
   }
 
-  // One token for the whole run: getToken() launches a browser each call, so
-  // minting per job would open one browser per job.
-  const token = await getToken();
-
+  // One browser for the run, one token per job. A tailoring call outlives a
+  // Clerk token, so a token minted before the loop is already dead by the
+  // second job.
+  const session = await openSession();
   const results = { tailored: 0, failed: 0 };
 
-  for (const job of jobs) {
-    process.stdout.write(`  #${job.id} ${job.title.slice(0, 50)} … `);
-    try {
-      const { coverLetter, language } = await tailorOne(job, profile, token);
-      results.tailored++;
-      console.log(`done [${language}]${coverLetter ? ' (+ cover letter)' : ''}`);
-    } catch (err) {
-      results.failed++;
-      console.log(`FAILED\n      ${err.message}`);
+  try {
+    for (const job of jobs) {
+      process.stdout.write(`  #${job.id} ${job.title.slice(0, 50)} … `);
+      try {
+        const token = await session.mintToken();
+        const { coverLetter, language } = await tailorOne(job, profile, token);
+        results.tailored++;
+        console.log(`done [${language}]${coverLetter ? ' (+ cover letter)' : ''}`);
+      } catch (err) {
+        results.failed++;
+        console.log(`FAILED\n      ${err.message}`);
+      }
     }
+  } finally {
+    await session.close();
   }
 
   return results;
