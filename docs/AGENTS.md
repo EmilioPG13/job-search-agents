@@ -114,12 +114,39 @@ Every transition also writes a row to `job_status_history` with a reason.
 
 ### Discovery — no model
 Fetches postings from job board APIs, maps them to the `jobs` schema, dedupes
-on `(source, source_id)`, runs the prompt-injection detector, inserts.
-Currently implemented for RemoteOK; sources are pluggable.
+on `(source, source_id)`, runs the prompt-injection detector, inserts. Six
+sources are wired up; they are pluggable via `src/sources/index.js`.
 
 **Deliberately dumb.** No judgment, no filtering. Job boards break constantly
 and this is the part most likely to fail — keeping it separate means a broken
 scraper can't take down the rest of the pipeline.
+
+#### Source yield, measured
+
+From `src/tools/compare-sources.js`, over a full run of 1,322 postings:
+
+| Source | Kept/fetched | |
+|---|---|---|
+| Hacker News "Who is hiring?" | 128/277 | 46% |
+| Get on Board (LatAm) | 105/253 | 42% |
+| Company boards (Greenhouse/Lever) | 75/504 | 15% |
+| We Work Remotely | 29/115 | 25% |
+| RemoteOK | 11/135 | 8% |
+| Remotive | 2/38 | 5% |
+
+Volume and usefulness are not the same thing: company boards contribute the
+most postings and the third-worst hit rate.
+
+**RemoteOK needs two workarounds.** Its text is double-encoded (UTF-8 re-encoded
+as Latin-1), which mangles every Spanish, Portuguese and French posting —
+repaired in `src/lib/text.js`, and safe to run twice. Its `tags` are SEO
+stuffing: 55 of 104 postings carried tech tags while only 3 had a tech title.
+Never filter on them.
+
+**Sources evaluated and rejected.** Indeed's Publisher API closed in 2024.
+LinkedIn, Glassdoor, Computrabajo and OCC Mundial have no public API, so
+reaching them means defeating bot detection — out of scope. Arbeitnow was
+measured and dropped: good yield, but onsite German roles.
 
 ### Prefilter — no model
 Rule checks against `profile.json`: salary floor, work mode, location,
@@ -207,11 +234,13 @@ resumed by simply running it again.
 
 1. ~~Schema + profile format~~ ✅
 2. ~~Prompt-injection defense~~ ✅
-3. ~~Discovery (RemoteOK)~~ ✅
-4. **Analysis** ← current
-5. Prefilter + Filter (needs a filled-in `profile.json`)
-6. Tailor (wire up CV Tailor)
-7. Verify
-8. Approval UI
-9. Application + Tracker
+3. ~~Discovery (six sources)~~ ✅
+4. ~~Analysis~~ ✅
+5. ~~Prefilter + Filter~~ ✅
+6. ~~Tailor (wire up CV Tailor)~~ ✅
+7. ~~Verify~~ ✅
+8. ~~Approval CLI (`npm run review`)~~ ✅
+9. **Application + Tracker** ← next. Export to
+   `data/applications/<company>-<id>/` and follow-up reminders. Automated
+   submission stays deliberately out of scope.
 10. Orchestrator loop — last, once each step works standalone
