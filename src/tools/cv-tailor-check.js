@@ -35,7 +35,6 @@ Medical Interpreter - Language Services Associates (2019 - present)
 - Managed scheduling and client communication as a remote contractor
 
 EDUCATION
-B.S. Computer Science (in progress) - IU International University
 Web Development Bootcamp - DEV.F, 2021-2022
 
 SKILLS
