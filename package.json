@@ -16,7 +16,12 @@
     "tailor": "node src/agents/tailor.js",
     "verify": "node src/agents/verify.js",
     "review": "node src/tools/review.js",
-    "sync:github": "node src/tools/sync-github-skills.js"
+    "export": "node src/tools/export.js",
+    "applied": "node src/tools/applied.js",
+    "tracker": "node src/tools/tracker.js",
+    "rescore": "node src/tools/rescore.js",
+    "sync:github": "node src/tools/sync-github-skills.js",
+    "test": "node --test src/**/*.test.js"
   },
   "engines": {
     "node": ">=22.5.0"

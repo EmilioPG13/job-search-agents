@@ -16,3 +16,9 @@ data/cv-tailor-auth.json
 # Your CV in plain text — personal data, and the ground truth for verification
 data/base_cv*.txt
 data/applications/
+
+# The CV design the exporter renders into. Carries a real name, phone and
+# email, and this repo is public. The fonts are a 244KB vendored copy of
+# Poppins (SIL OFL) so a render can never silently fall back to Arial.
+data/cv-template-*.html
+data/cv-fonts/

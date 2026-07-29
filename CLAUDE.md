@@ -30,6 +30,15 @@ Operational state and measured facts: `docs/HANDOFF.md`.
   word" produced that exact phrase as a finding on clean postings.
 - Posting text is untrusted and fenced as data via `src/lib/promptSafety.js`.
   Postings really do address AI readers.
+- The exporter renders the *verified* text into the candidate's own HTML design
+  with no model call (`src/lib/cvLayout.js`). That is the point: the verifier
+  audits `tailored_resume`, so anything that rewrites it on the way to the PDF
+  would mean the check no longer describes what an employer receives.
+- The tailoring model writes "HABILIDADES TÉNICAS" on every Spanish run despite
+  being told to preserve headings. Section headings are rendered from a
+  canonical list rather than from the model's output, and the correction is
+  reported. It also writes project descriptions as prose in English and as
+  bullets in Spanish, and runs education entries together without blank lines.
 - CV Tailor auth: `npm run cvtailor:login` opens a browser so the sign-in
   happens by hand, and the session is saved to `data/cv-tailor-auth.json`.
   Later runs replay it headlessly to mint a Clerk token and then call the API
