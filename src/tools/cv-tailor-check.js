@@ -11,9 +11,9 @@ const { getServiceInfo, getToken, tailor, hasSavedLogin, API_URL } = require('..
 // return {result: null} with a 200 status, which read as a broken integration
 // when the request shape was in fact correct — it simply had too little to
 // work with.
-const SAMPLE_CV = `Emilio Perez
-Junior Software Developer - Puebla, Mexico
-emilio@example.com - github.com/example
+const SAMPLE_CV = `Daniel Navarro
+Junior Software Developer - Guadalajara, Mexico
+daniel@example.com - github.com/example
 
 PROFILE
 Full-stack developer with two years of hands-on experience building React
@@ -26,16 +26,16 @@ E-commerce API - Node.js, Express, PostgreSQL, Sequelize, JWT, Stripe, React
 - Built a full-stack platform with authentication, cart and order management
 - Integrated Stripe checkout and documented the API with Swagger
 
-Reddit Lite - React, Vite, Tailwind CSS
-- Lightweight Reddit client with subreddit browsing and post search
+Recipe Board - React, Vite, Tailwind CSS
+- Lightweight recipe-sharing client with tag browsing and post search
 
 WORK EXPERIENCE
-Medical Interpreter - Language Services Associates (2019 - present)
+Medical Interpreter - Brightwater Interpreting Services (2019 - present)
 - Real-time English-Spanish interpretation for U.S. clinical clients
 - Managed scheduling and client communication as a remote contractor
 
 EDUCATION
-Web Development Bootcamp - DEV.F, 2021-2022
+Web Development Bootcamp - Northgate Web Bootcamp, 2021-2022
 
 SKILLS
 JavaScript, TypeScript, Python, SQL, React, Node.js, Express, PostgreSQL,

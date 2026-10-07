@@ -107,7 +107,7 @@ test('Spanish headings are recognised', () => {
     'HABILIDADES TÉCNICAS', 'Lenguajes: JavaScript, TypeScript', 'Pruebas: Vitest', 'Bases de Datos: PostgreSQL', '',
     'PROYECTOS', 'Larsen Italiana', 'React · TypeScript', 'Sitio full-stack de marketing.', '',
     'E-commerce API', 'Node.js · Express', 'Plataforma e-commerce full-stack.', '',
-    'EXPERIENCIA LABORAL', 'Intérprete Médico — Language Services Associates', 'Abr 2019 – Jul 2026', '- Interpretación inglés–español remota.', '',
+    'EXPERIENCIA LABORAL', 'Intérprete Médico — Brightwater Interpreting Services', 'Abr 2019 – Jul 2026', '- Interpretación inglés–español remota.', '',
     'EDUCACIÓN', 'Lic. en Mercadotecnia — Universidad Madero · Puebla', '',
     'IDIOMAS', 'Español — Nativo', 'Inglés — C2 · Casi Nativo',
   ].join('\n');
