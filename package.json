@@ -21,7 +21,7 @@
     "tracker": "node src/tools/tracker.js",
     "rescore": "node src/tools/rescore.js",
     "sync:github": "node src/tools/sync-github-skills.js",
-    "test": "node --test src/**/*.test.js"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=22.5.0"
