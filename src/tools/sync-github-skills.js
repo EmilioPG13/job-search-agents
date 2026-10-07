@@ -10,9 +10,9 @@
 //   github  evidenced by repos, absent from the CV
 //   both    claimed and evidenced
 //
-// This matters in practice. Emilio's CV omits TypeScript entirely, while it is
-// 89-99% of his three most recent projects — and postings ask for it by name.
-// Scoring against the CV alone was quietly underselling him.
+// This matters in practice. The candidate's CV omits TypeScript entirely, while it is
+// 89-99% of their three most recent projects — and postings ask for it by name.
+// Scoring against the CV alone was quietly underselling them.
 //
 // Run as a separate step rather than fetching during scoring: the pipeline
 // stays usable offline, GitHub's 60-requests-per-hour unauthenticated limit

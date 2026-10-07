@@ -1,6 +1,6 @@
 // Which CV to use for a given posting.
 //
-// Emilio is Spanish-native and English C2, and keeps both CVs. A Spanish
+// The candidate is Spanish-native and English C2, and keeps both CVs. A Spanish
 // posting from Get on Board should be answered with the Spanish CV, an English
 // Hacker News posting with the English one.
 //

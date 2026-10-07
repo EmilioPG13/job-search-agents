@@ -189,7 +189,7 @@ function parseRole(block) {
 }
 
 // A qualification line names the award and the institution, separated by an
-// em dash: "B.S. Marketing — Universidad Madero · Puebla". A date range uses an
+// em dash: "B.S. Marketing — Universidad del Valle Central · Guadalajara". A date range uses an
 // en dash instead ("Oct 2021 – Oct 2022"), which is what keeps the two apart.
 const DATE_RANGE = /^[A-Za-zÁÉÍÓÚáéíóúñ.]*\s*\d{4}\s*[–-]\s*[A-Za-zÁÉÍÓÚáéíóúñ.]*\s*\d{4}/;
 const startsQualification = (line) => / — /.test(line) && !DATE_RANGE.test(line);
