@@ -1,3 +1,5 @@
+[![CI](https://github.com/EmilioPG13/job-search-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/EmilioPG13/job-search-agents/actions/workflows/ci.yml)
+
 # Job Search Agents
 
 A pipeline that reads job boards, filters them against your real skills, tailors
