@@ -12,6 +12,18 @@ const { parseTailoredCv, renderCv, levelWidth } = require('./cvLayout');
 
 const DB_PATH = path.join(__dirname, '../../data/jobs.sqlite');
 
+// The CV templates and the personal CV text live in data/, which is gitignored
+// (they carry real contact details). On a clean checkout they do not exist, so
+// the tests that need them skip instead of failing.
+function privateFile(t, name) {
+  const file = path.join(__dirname, '../../data', name);
+  if (!fs.existsSync(file)) {
+    t.skip(`data/${name} is gitignored and not present`);
+    return null;
+  }
+  return fs.readFileSync(file, 'utf8');
+}
+
 function tailoredCvs() {
   if (!fs.existsSync(DB_PATH)) return [];
   const { DatabaseSync } = require('node:sqlite');
@@ -67,12 +79,10 @@ for (const row of rows) {
     }
   });
 
-  test(`#${row.id} renders with no markers left behind`, () => {
+  test(`#${row.id} renders with no markers left behind`, (t) => {
     const parsed = parseTailoredCv(row.tailored_resume);
-    const template = fs.readFileSync(
-      path.join(__dirname, `../../data/cv-template-${parsed.language}.html`),
-      'utf8',
-    );
+    const template = privateFile(t, `cv-template-${parsed.language}.html`);
+    if (template === null) return;
     const html = renderCv(parsed, template);
 
     assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}/, 'no unfilled markers');
@@ -82,7 +92,7 @@ for (const row of rows) {
 }
 
 test('a missing section throws rather than rendering a gap', () => {
-  const truncated = 'Emilio Parra\nDEVELOPER\n\nPROFILE\nSomething.\n';
+  const truncated = 'Daniel Navarro\nDEVELOPER\n\nPROFILE\nSomething.\n';
   assert.throws(() => parseTailoredCv(truncated), /missing section/i);
 });
 
@@ -92,7 +102,7 @@ test('empty input throws', () => {
 
 test('a section present but empty is rejected', () => {
   const hollow = [
-    'Emilio Parra', 'DEVELOPER', '',
+    'Daniel Navarro', 'DEVELOPER', '',
     'PROFILE', '', 'TECHNICAL SKILLS', '', 'PROJECTS', '',
     'WORK EXPERIENCE', '', 'EDUCATION', '', 'LANGUAGES', '',
   ].join('\n');
@@ -101,14 +111,14 @@ test('a section present but empty is rejected', () => {
 
 test('Spanish headings are recognised', () => {
   const es = [
-    'Emilio Parra González', 'DESARROLLADOR', 'correo@example.com', '',
+    'Daniel Navarro González', 'DESARROLLADOR', 'correo@example.com', '',
     'PERFIL PROFESIONAL',
     'Desarrollador full-stack con dos años de experiencia práctica construyendo aplicaciones web con React y TypeScript en todo el stack.', '',
     'HABILIDADES TÉCNICAS', 'Lenguajes: JavaScript, TypeScript', 'Pruebas: Vitest', 'Bases de Datos: PostgreSQL', '',
     'PROYECTOS', 'Larsen Italiana', 'React · TypeScript', 'Sitio full-stack de marketing.', '',
     'E-commerce API', 'Node.js · Express', 'Plataforma e-commerce full-stack.', '',
     'EXPERIENCIA LABORAL', 'Intérprete Médico — Brightwater Interpreting Services', 'Abr 2019 – Jul 2026', '- Interpretación inglés–español remota.', '',
-    'EDUCACIÓN', 'Lic. en Mercadotecnia — Universidad Madero · Puebla', '',
+    'EDUCACIÓN', 'Lic. en Mercadotecnia — Universidad del Valle Central · Guadalajara', '',
     'IDIOMAS', 'Español — Nativo', 'Inglés — C2 · Casi Nativo',
   ].join('\n');
 
@@ -121,16 +131,16 @@ test('Spanish headings are recognised', () => {
   assert.equal(cv.projects.length, 2);
 });
 
-test('the model\'s misspelled Spanish skills heading is accepted and corrected', () => {
+test('the model\'s misspelled Spanish skills heading is accepted and corrected', (t) => {
   // The tailoring model emits "HABILIDADES TÉNICAS" on every Spanish run. It has
   // to parse, and it must not reach the rendered page.
   const es = [
-    'Emilio Parra González', 'DESARROLLADOR', 'correo@example.com', '',
+    'Daniel Navarro González', 'DESARROLLADOR', 'correo@example.com', '',
     'PERFIL PROFESIONAL', 'Desarrollador full-stack con dos años de experiencia práctica construyendo aplicaciones web en todo el stack.', '',
     'HABILIDADES TÉNICAS', 'Lenguajes: JavaScript, TypeScript', '',
     'PROYECTOS', 'Larsen', 'React · TypeScript', 'Sitio de marketing.', '',
     'EXPERIENCIA LABORAL', 'Intérprete — LSA', 'Abr 2019 – Jul 2026', '- Interpretación remota.', '',
-    'EDUCACIÓN', 'Lic. en Mercadotecnia — Universidad Madero', '',
+    'EDUCACIÓN', 'Lic. en Mercadotecnia — Universidad del Valle Central', '',
     'IDIOMAS', 'Español — Nativo', 'Inglés — C2',
   ].join('\n');
 
@@ -141,7 +151,8 @@ test('the model\'s misspelled Spanish skills heading is accepted and corrected',
     'and reports the correction rather than making it silently',
   );
 
-  const template = fs.readFileSync(path.join(__dirname, '../../data/cv-template-es.html'), 'utf8');
+  const template = privateFile(t, 'cv-template-es.html');
+  if (template === null) return;
   const html = renderCv(cv, template);
   assert.ok(!html.includes('TÉNICAS'), 'the typo must not reach the page');
   assert.ok(html.includes('HABILIDADES TÉCNICAS'));
@@ -159,9 +170,9 @@ test('education splits per qualification even without blank lines between them',
       'PROJECTS', 'P', 'React · Vite', 'Did a thing.', '',
       'WORK EXPERIENCE', 'Role — Employer', '2019 – 2026', '- Did work.', '',
       'EDUCATION',
-      'B.S. Marketing — Universidad Madero · Puebla · Graduating 2026',
+      'B.S. Marketing — Universidad del Valle Central · Guadalajara · Graduating 2026',
       'Specialization: Digital Marketing & Market Research',
-      'Web Development Bootcamp — DEV.F · Mexico City',
+      'Web Development Bootcamp — Northgate Web Bootcamp · Mexico City',
       'Oct 2021 – Oct 2022',
       'Full-stack curriculum: JavaScript, Node.js',
       '',
@@ -177,14 +188,14 @@ test('education splits per qualification even without blank lines between them',
   assert.ok(cv.education[1].includes('Oct 2021 – Oct 2022'));
 });
 
-test('contact items each get their own line', () => {
+test('contact items each get their own line', (t) => {
   // Two packed lines from the model became a crowded block that wrapped the
   // LinkedIn URL mid-word and pushed the tagline onto a second line.
   const parsed = {
     name: 'A B', tagline: 'T',
     contact: [
-      'Emilio.PG95@gmail.com (222) 752-8799 · Puebla, México',
-      'github.com/EmilioPG13 linkedin.com/in/emilio-parra-3813a5107',
+      'daniel@example.com (555) 010-4477 · Guadalajara, México',
+      'github.com/danielnavarro linkedin.com/in/daniel-navarro',
     ],
     headings: { profile: 'PROFILE', skills: 'S', projects: 'P', experience: 'W', education: 'E', languages: 'L' },
     profile: 'x', skills: [{ label: 'L', items: ['JS'] }],
@@ -192,14 +203,15 @@ test('contact items each get their own line', () => {
     experience: [{ title: 'T', org: '', dates: '', bullets: [] }],
     education: [['School']], languages: [{ name: 'Spanish', level: 'Native' }],
   };
-  const template = fs.readFileSync(path.join(__dirname, '../../data/cv-template-en.html'), 'utf8');
+  const template = privateFile(t, 'cv-template-en.html');
+  if (template === null) return;
   const html = renderCv(parsed, template);
   const block = html.split('<div class="contact">')[1].split('</div>')[0];
 
   assert.equal((block.match(/<br>/g) || []).length, 3, 'four lines, so three breaks');
-  assert.ok(block.includes('Emilio.PG95@gmail.com'));
-  assert.ok(block.includes('href="https://github.com/EmilioPG13"'), 'URLs become links');
-  assert.ok(block.includes('(222) 752-8799 · Puebla, México'), 'phone and location stay together');
+  assert.ok(block.includes('daniel@example.com'));
+  assert.ok(block.includes('href="https://github.com/danielnavarro"'), 'URLs become links');
+  assert.ok(block.includes('(555) 010-4477 · Guadalajara, México'), 'phone and location stay together');
 });
 
 test('language bar widths follow the stated level', () => {
@@ -210,7 +222,7 @@ test('language bar widths follow the stated level', () => {
   assert.equal(levelWidth('B1'), 55);
 });
 
-test('CV text containing HTML is escaped, not injected', () => {
+test('CV text containing HTML is escaped, not injected', (t) => {
   const parsed = {
     name: 'A B', tagline: 'T', contact: ['x@y.com'],
     headings: { profile: 'PROFILE', skills: 'SKILLS', projects: 'PROJECTS', experience: 'WORK', education: 'EDU', languages: 'LANG' },
@@ -221,7 +233,8 @@ test('CV text containing HTML is escaped, not injected', () => {
     education: [['School']],
     languages: [{ name: 'Spanish', level: 'Native' }],
   };
-  const template = fs.readFileSync(path.join(__dirname, '../../data/cv-template-en.html'), 'utf8');
+  const template = privateFile(t, 'cv-template-en.html');
+  if (template === null) return;
   const html = renderCv(parsed, template);
 
   assert.ok(!html.includes('<script>alert(1)</script>'), 'script tag must not survive');
